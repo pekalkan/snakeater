@@ -132,6 +132,19 @@ class Snake:
             s += dist(self.points[i], self.points[i + 1])
         return s
 
+    def cut_from_index(self, i: int, ip: tuple) -> float:
+        """Cut the trail at segment index i with intersection point ip.
+        Returns the length that was removed from the tail.
+        Also updates self.length to the new actual trail length."""
+        old_len = self._trail_length()
+        # replace the vertex with the exact intersection, then truncate
+        self.points[i] = ip
+        self.points = self.points[: i + 1]
+        new_len = self._trail_length()
+        lost = max(0.0, old_len - new_len)
+        self.length = new_len
+        return lost
+
     def _self_cut_if_crossed(self) -> None:
         """Cut the snake if the newest head segment crosses an older segment."""
         if len(self.points) < 3:
@@ -271,6 +284,28 @@ def draw_foods(surf: pygame.Surface, camx: float, camy: float) -> None:
         col = BOOST_COLOR if f.get("kind") == "boost" else FOOD_COLOR
         pygame.draw.circle(surf, col, (sx, sy), f["r"])
 
+
+# ---------------- Steal Mechanic ----------------
+def steal_if_cross(attacker: Snake, defender: Snake, skip_recent: int = 4) -> float:
+    """If the attacker's newest head segment crosses any older segment
+    of the defender, cut the defender there and transfer the removed
+    length to the attacker. Returns the stolen length (0.0 if none)."""
+    if len(attacker.points) < 2 or len(defender.points) < 2:
+        return 0.0
+
+    p0 = attacker.points[0]
+    p1 = attacker.points[1]
+    last_idx = len(defender.points) - 1
+
+    # skip a few most‑recent defender segments near its head
+    for i in range(skip_recent, last_idx):
+        hit, ip = segment_intersection(p0, p1, defender.points[i], defender.points[i + 1])
+        if hit:
+            stolen = defender.cut_from_index(i, ip)
+            attacker.length += stolen
+            return stolen
+    return 0.0
+
 # ---------------- HUD ----------------
 def draw_hud_two(surf: pygame.Surface, s1: Snake, eaten1: int, s2: Snake, eaten2: int) -> None:
     # left panel (P1)
@@ -328,6 +363,10 @@ def main():
         snake2.update(dt)
         total_eaten1 += eat_food_if_colliding(snake1)
         total_eaten2 += eat_food_if_colliding(snake2)
+
+        # Steal mechanic: if one crosses the other, transfer length
+        stolen12 = steal_if_cross(snake1, snake2)
+        stolen21 = steal_if_cross(snake2, snake1)
 
         # Camera follows midpoint between snakes
         camx = 0.5 * (snake1.x + snake2.x) - W / 2
