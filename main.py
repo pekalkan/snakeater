@@ -94,9 +94,9 @@ class Snake:
 
 # ---------------- Infinite World (chunks) ----------------
 CHUNK_SIZE = 800                   # world is split into square chunks
-FOOD_PER_CHUNK = 30
-FOOD_MIN_R, FOOD_MAX_R = 3, 6
-FOOD_GROWTH = 30.0                 # how much length a single food grants
+FOOD_PER_CHUNK = 12               # fewer food per chunk
+FOOD_R = 4                        # uniform food radius
+FOOD_GROWTH = 30.0                # how much length a single food grants
 
 spawned_chunks = set()             # {(cx, cy)}
 foods = []                         # list of dicts: {"x","y","r"}
@@ -116,7 +116,7 @@ def spawn_chunk(cx: int, cy: int) -> None:
     for _ in range(FOOD_PER_CHUNK):
         fx = random.uniform(left + margin, left + CHUNK_SIZE - margin)
         fy = random.uniform(top + margin, top + CHUNK_SIZE - margin)
-        fr = random.randint(FOOD_MIN_R, FOOD_MAX_R)
+        fr = FOOD_R
         foods.append({"x": fx, "y": fy, "r": fr})
 
 def ensure_chunks_around(px: float, py: float, radius_chunks: int = 1) -> None:
