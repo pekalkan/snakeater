@@ -122,6 +122,22 @@ class Snake:
                 pts[-1] = (a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t)
                 break
 
+    def _push_head_samples(self, new_head):
+        """Insert evenly spaced samples between previous head and new head,
+        so the body stays continuous even at very high speeds."""
+        prev = self.points[0]
+        d = dist(new_head, prev)
+        if d <= 1e-6:
+            return
+        # target spacing ~ body thickness (slightly tighter), with a safety cap
+        desired = max(2.0, self.thickness * 0.8)
+        steps = int(d / desired)
+        steps = max(1, min(steps, 120))  # cap to protect performance
+        step_x = (new_head[0] - prev[0]) / steps
+        step_y = (new_head[1] - prev[1]) / steps
+        for i in range(1, steps + 1):
+            self.points.insert(0, (prev[0] + step_x * i, prev[1] + step_y * i))
+
     def _trail_length(self) -> float:
         """Compute current polyline length of the trail."""
         s = 0.0
@@ -174,9 +190,7 @@ class Snake:
             self.boost_mul = 1.0
 
         self.handle_input(dt)
-        head = (self.x, self.y)
-        if dist(head, self.points[0]) >= self.min_step:
-            self.points.insert(0, head)
+        self._push_head_samples((self.x, self.y))
         self._trim_trail_to_length()
         self._self_cut_if_crossed()
 
@@ -194,7 +208,7 @@ CHUNK_SIZE = 800                   # world is split into square chunks
 FOOD_PER_CHUNK = 12
 FOOD_R = 6
 FOOD_GROWTH = 30.0                 # how much length a single food grants
-BOOST_FRACTION = 0.50            # 50% of foods are boost orbs (10x more)
+BOOST_FRACTION = 0.03            # 3% of foods are boost orbs
 BOOST_MULT     = 1.5             # move at 1.5x when boosted
 BOOST_DURATION = 5.0             # boost lasts 5 seconds
 
