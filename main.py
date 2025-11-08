@@ -191,7 +191,7 @@ FOOD_PER_CHUNK = 12
 FOOD_R = 6
 FOOD_GROWTH = 30.0
 
-BOOST_FRACTION = 0.03   # 3% of foods are boost orbs
+BOOST_FRACTION = 0.50   # not used for selection now; kept for reference
 BOOST_MULT     = 1.5    # move at 1.5x when boosted
 BOOST_DURATION = 5.0    # boost lasts 5 seconds
 
@@ -204,17 +204,31 @@ def chunk_of(px: float, py: float):
     return int(cx), int(cy)
 
 def spawn_chunk(cx: int, cy: int) -> None:
-    """Create FOOD_PER_CHUNK food items randomly within a chunk."""
+    """Create FOOD_PER_CHUNK food items randomly within a chunk.
+    Exactly half will be normal and half boost (±1 if odd)."""
     global foods
     left = cx * CHUNK_SIZE
     top  = cy * CHUNK_SIZE
     margin = 20
-    for _ in range(FOOD_PER_CHUNK):
+
+    # Deterministic split: half normal, half boost
+    num_boost = FOOD_PER_CHUNK // 2
+    num_normal = FOOD_PER_CHUNK - num_boost  # remainder goes to normal
+
+    def rand_pos():
         fx = random.uniform(left + margin, left + CHUNK_SIZE - margin)
         fy = random.uniform(top + margin, top + CHUNK_SIZE - margin)
-        fr = FOOD_R
-        kind = "boost" if random.random() < BOOST_FRACTION else "normal"
-        foods.append({"x": fx, "y": fy, "r": fr, "kind": kind})
+        return fx, fy
+
+    # Spawn normal foods
+    for _ in range(num_normal):
+        fx, fy = rand_pos()
+        foods.append({"x": fx, "y": fy, "r": FOOD_R, "kind": "normal"})
+
+    # Spawn boost foods
+    for _ in range(num_boost):
+        fx, fy = rand_pos()
+        foods.append({"x": fx, "y": fy, "r": FOOD_R, "kind": "boost"})
 
 def ensure_chunks_around(px: float, py: float, radius_chunks: int = 1) -> None:
     """Make sure the 3x3 neighborhood around the player is spawned."""
