@@ -94,7 +94,7 @@ class Snake:
 
 # ---------------- Infinite World (chunks) ----------------
 CHUNK_SIZE = 800                   # world is split into square chunks
-FOOD_PER_CHUNK = 90
+FOOD_PER_CHUNK = 30
 FOOD_MIN_R, FOOD_MAX_R = 3, 6
 FOOD_GROWTH = 30.0                 # how much length a single food grants
 
