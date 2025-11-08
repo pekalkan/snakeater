@@ -10,7 +10,15 @@ W, H = 960, 600
 screen = pygame.display.set_mode((W, H))
 pygame.display.set_caption("snakeater - step 2 (infinite world + food)")
 clock = pygame.time.Clock()
-FONT = pygame.font.SysFont("Arial", 18)
+FONT = pygame.font.SysFont("Menlo", 20)
+
+# ---------------- Colors ----------------
+BG_COLOR     = (18, 22, 28)
+SNAKE_BODY   = (60, 190, 90)    # green body
+SNAKE_HEAD   = (110, 240, 140)  # lighter green head highlight
+FOOD_COLOR   = (255, 205, 120)
+HUD_BG       = (20, 20, 20, 140)  # semi-transparent dark panel
+HUD_TEXT     = (235, 245, 235)
 
 # ---------------- Helpers ----------------
 def dist(a, b):
@@ -92,10 +100,10 @@ class Snake:
         # Draw body: circles along the trail (skip every other point for performance)
         for p in self.points[::2]:
             sx, sy = world_to_screen(p[0], p[1], camx, camy)
-            pygame.draw.circle(surf, (120, 200, 255), (sx, sy), self.thickness)
+            pygame.draw.circle(surf, SNAKE_BODY, (sx, sy), self.thickness)
         # Head highlight
         hx, hy = world_to_screen(self.x, self.y, camx, camy)
-        pygame.draw.circle(surf, (160, 230, 255), (hx, hy), self.thickness + 1)
+        pygame.draw.circle(surf, SNAKE_HEAD, (hx, hy), self.thickness + 1)
 
 # ---------------- Infinite World (chunks) ----------------
 CHUNK_SIZE = 800                   # world is split into square chunks
@@ -164,12 +172,25 @@ def eat_food_if_colliding(snake: Snake) -> int:
 def draw_foods(surf: pygame.Surface, camx: float, camy: float) -> None:
     for f in foods:
         sx, sy = world_to_screen(f["x"], f["y"], camx, camy)
-        pygame.draw.circle(surf, (255, 205, 120), (sx, sy), f["r"])
+        pygame.draw.circle(surf, FOOD_COLOR, (sx, sy), f["r"])
 
 # ---------------- HUD ----------------
 def draw_hud(surf: pygame.Surface, snake: Snake, eaten_total: int) -> None:
-    msg = f"Len: {int(snake.length)}   Speed: {int(snake.speed_current)}   Food eaten: {eaten_total}"
-    surf.blit(FONT.render(msg, True, (240, 240, 240)), (12, 10))
+    # Build a compact monospaced line
+    text = f"LEN {int(snake.length):4d}   SPD {int(snake.speed_current):3d}   FOOD {eaten_total:3d}"
+    txt = FONT.render(text, True, HUD_TEXT)
+
+    pad = 10
+    w = txt.get_width() + pad * 2
+    h = txt.get_height() + pad * 2
+
+    # Translucent HUD surface with rounded corners
+    hud = pygame.Surface((w, h), pygame.SRCALPHA)
+    pygame.draw.rect(hud, HUD_BG, hud.get_rect(), border_radius=10)
+    hud.blit(txt, (pad, pad))
+
+    # Top-left placement with small margin
+    surf.blit(hud, (12, 10))
 
 # ---------------- Main Loop ----------------
 snake = Snake(0.0, 0.0)          # start at world origin
@@ -199,7 +220,7 @@ def main():
         camy = snake.y - H / 2
 
         # Draw
-        screen.fill((18, 22, 28))
+        screen.fill(BG_COLOR)
         draw_foods(screen, camx, camy)
         snake.draw(screen, camx, camy)
         draw_hud(screen, snake, total_eaten)
