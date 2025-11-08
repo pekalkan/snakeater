@@ -18,7 +18,7 @@ BG_COLOR     = (18, 22, 28)
 SNAKE_BODY   = (60, 190, 90)    # green body
 SNAKE_HEAD   = (110, 240, 140)  # lighter green head highlight
 FOOD_COLOR   = (255, 255, 255)
-BOOST_COLOR  = (255, 255, 255)   # boost food is also white
+BOOST_COLOR  = (255, 215, 0)     # golden boost food
 HUD_BG       = (20, 20, 20, 140)  # semi-transparent dark panel
 HUD_TEXT     = (235, 245, 235)
 
@@ -155,8 +155,15 @@ class Snake:
                 break
 
     def apply_boost(self, mult: float, duration: float) -> None:
-        self.boost_mul = mult
-        self.boost_until = time.time() + duration
+        now = time.time()
+        if now < self.boost_until and self.boost_mul > 1.0:
+            # Still boosted → multiply for exponential stacking and refresh timer
+            self.boost_mul *= mult
+            self.boost_until = now + duration
+        else:
+            # Not boosted → start fresh
+            self.boost_mul = mult
+            self.boost_until = now + duration
 
     def grow(self, amount: float) -> None:
         self.length += float(amount)
@@ -187,7 +194,7 @@ CHUNK_SIZE = 800                   # world is split into square chunks
 FOOD_PER_CHUNK = 12
 FOOD_R = 6
 FOOD_GROWTH = 30.0                 # how much length a single food grants
-BOOST_FRACTION = 0.05            # 5% of foods are boost orbs
+BOOST_FRACTION = 0.50            # 50% of foods are boost orbs (10x more)
 BOOST_MULT     = 1.5             # move at 1.5x when boosted
 BOOST_DURATION = 5.0             # boost lasts 5 seconds
 
