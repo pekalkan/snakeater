@@ -226,17 +226,22 @@ class Snake:
 
 # ---------------- Infinite World (chunks) ----------------
 CHUNK_SIZE = 800
-FOOD_PER_CHUNK = 12
+FOOD_PER_CHUNK = 6
 FOOD_R = 6
 FOOD_GROWTH = 30.0
 
-BOOST_FRACTION = 0.02   # 2% of foods are boost orbs
+BOOST_FRACTION = 0.01   # 1% of foods are boost orbs
 BOOST_MULT     = 1.5    # move at 1.5x when boosted
 BOOST_DURATION = 5.0    # boost lasts 5 seconds
+# Periodic respawn to keep nearby chunks populated
+SPAWN_INTERVAL = 3.0          # seconds between density checks
+SPAWN_RADIUS_CHUNKS = 1       # maintain chunks around players
+TARGET_PER_CHUNK = FOOD_PER_CHUNK  # desired items per active chunk
 PREDATION_RATIO = 1.0    # attacker must be > (ratio × defender.length) to steal
 
 spawned_chunks = set()  # {(cx, cy)}
 foods = []              # list of dicts: {"x","y","r","kind"}
+last_density_spawn = 0.0
 
 def chunk_of(px: float, py: float):
     cx = math.floor(px / CHUNK_SIZE)
@@ -251,10 +256,12 @@ def chunk_intersects_world(cx: int, cy: int) -> bool:
     bottom = top + CHUNK_SIZE
     return not (right <= WORLD_LEFT or left >= WORLD_RIGHT or bottom <= WORLD_TOP or top >= WORLD_BOTTOM)
 
-def spawn_chunk(cx: int, cy: int) -> None:
-    """Create FOOD_PER_CHUNK food items randomly within the intersection of
+def spawn_chunk(cx: int, cy: int, count: int | None = None) -> None:
+    """Create up to `count` food items randomly within the intersection of
     the chunk and the finite world. Each food has BOOST_FRACTION chance to be boost."""
     global foods
+    if count is None:
+        count = FOOD_PER_CHUNK
     left = cx * CHUNK_SIZE
     top  = cy * CHUNK_SIZE
     margin = 20
@@ -268,7 +275,7 @@ def spawn_chunk(cx: int, cy: int) -> None:
     if minx >= maxx or miny >= maxy:
         return  # chunk lies outside world
 
-    for _ in range(FOOD_PER_CHUNK):
+    for _ in range(count):
         fx = random.uniform(minx, maxx)
         fy = random.uniform(miny, maxy)
         fr = FOOD_R
@@ -295,6 +302,49 @@ def cull_far_foods(px: float, py: float, keep_radius_chunks: int = 2) -> None:
         if abs(cx - pcx) <= keep_radius_chunks and abs(cy - pcy) <= keep_radius_chunks:
             keep.append(f)
     foods = keep
+
+# --- Periodic chunk density spawn ---
+def periodic_spawn_around(points: list[tuple[float, float]]) -> None:
+    """Every SPAWN_INTERVAL seconds, ensure each chunk near `points`
+    reaches TARGET_PER_CHUNK items by spawning the deficit."""
+    global last_density_spawn
+    now = time.time()
+    if now - last_density_spawn < SPAWN_INTERVAL:
+        return
+
+    # Build the set of nearby chunk keys to maintain
+    keys: set[tuple[int, int]] = set()
+    for (px, py) in points:
+        pcx, pcy = chunk_of(px, py)
+        for dy in range(-SPAWN_RADIUS_CHUNKS, SPAWN_RADIUS_CHUNKS + 1):
+            for dx in range(-SPAWN_RADIUS_CHUNKS, SPAWN_RADIUS_CHUNKS + 1):
+                key = (pcx + dx, pcy + dy)
+                if chunk_intersects_world(*key):
+                    keys.add(key)
+
+    if not keys:
+        last_density_spawn = now
+        return
+
+    # Ensure chunks exist and count items per chunk
+    counts: dict[tuple[int, int], int] = {k: 0 for k in keys}
+    for key in keys:
+        if key not in spawned_chunks:
+            spawn_chunk(*key)
+            spawned_chunks.add(key)
+
+    for f in foods:
+        k = chunk_of(f["x"], f["y"])
+        if k in counts:
+            counts[k] += 1
+
+    # Spawn deficits
+    for key, cnt in counts.items():
+        missing = TARGET_PER_CHUNK - cnt
+        if missing > 0:
+            spawn_chunk(key[0], key[1], missing)
+
+    last_density_spawn = now
 
 def eat_food_if_colliding(snake: Snake) -> int:
     """Consume food that collides with the snake head. Returns number eaten."""
@@ -457,6 +507,7 @@ def main():
             # World management for P1 only
             ensure_chunks_around(snake1.x, snake1.y, radius_chunks=1)
             cull_far_foods(snake1.x, snake1.y, keep_radius_chunks=2)
+            periodic_spawn_around([(snake1.x, snake1.y)])
 
             # Update P1
             snake1.update(dt)
@@ -482,6 +533,7 @@ def main():
         midx = 0.5 * (snake1.x + snake2.x)
         midy = 0.5 * (snake1.y + snake2.y)
         cull_far_foods(midx, midy, keep_radius_chunks=2)
+        periodic_spawn_around([(snake1.x, snake1.y), (snake2.x, snake2.y)])
 
         # Update both
         snake1.update(dt)
