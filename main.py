@@ -12,6 +12,7 @@ screen = pygame.display.set_mode((W, H))
 pygame.display.set_caption("snakeater - step 2 (infinite world + food)")
 clock = pygame.time.Clock()
 FONT = pygame.font.SysFont("Menlo", 20)
+TITLE_FONT = pygame.font.SysFont("Menlo", 48)
 
 # ---------------- Colors ----------------
 BG_COLOR   = (18, 22, 28)
@@ -23,6 +24,9 @@ FOOD_COLOR = (255, 255, 255)   # normal food = white
 BOOST_COLOR = (255, 215, 0)    # golden boost food
 HUD_BG     = (20, 20, 20, 140) # translucent HUD background
 HUD_TEXT   = (235, 245, 235)
+BTN_NORMAL  = (60, 190, 90)
+BTN_HOVER   = (90, 210, 120)
+BTN_TEXT    = (245, 255, 245)
 
 # ---------------- Helpers ----------------
 def dist(a, b):
@@ -285,6 +289,22 @@ def draw_foods(surf: pygame.Surface, camx: float, camy: float) -> None:
         col = BOOST_COLOR if f.get("kind") == "boost" else FOOD_COLOR
         pygame.draw.circle(surf, col, (sx, sy), f["r"])
 
+def draw_start_menu(surf: pygame.Surface, start_rect: pygame.Rect) -> None:
+    surf.fill(BG_COLOR)
+    # Title and hint
+    title = TITLE_FONT.render("SNAKEATER", True, HUD_TEXT)
+    hint  = FONT.render("Press Enter or Click Start", True, HUD_TEXT)
+    surf.blit(title, ((W - title.get_width()) // 2, int(H * 0.32)))
+    surf.blit(hint,  ((W - hint.get_width())  // 2, int(H * 0.32) + title.get_height() + 12))
+
+    # Button (hover effect)
+    mx, my = pygame.mouse.get_pos()
+    hover = start_rect.collidepoint((mx, my))
+    color = BTN_HOVER if hover else BTN_NORMAL
+    pygame.draw.rect(surf, color, start_rect, border_radius=12)
+    label = FONT.render("START", True, BTN_TEXT)
+    surf.blit(label, (start_rect.x + (start_rect.width  - label.get_width())  // 2,
+                      start_rect.y + (start_rect.height - label.get_height()) // 2))
 
 # ---------------- Steal Mechanic ----------------
 def steal_if_cross(attacker: Snake, defender: Snake, skip_recent: int = 4) -> float:
@@ -346,14 +366,31 @@ total_eaten2 = 0
 def main():
     global total_eaten1, total_eaten2
     running = True
+    game_state = "menu"
+    start_rect = pygame.Rect((W - 260) // 2, int(H * 0.55), 260, 64)
+
     while running:
         dt = clock.tick(60) / 1000.0
 
         # Events
         for e in pygame.event.get():
-            if e.type == pygame.QUIT or (e.type == pygame.KEYDOWN and e.key == pygame.K_ESCAPE):
+            if e.type == pygame.QUIT:
+                running = False
+            elif e.type == pygame.KEYDOWN and e.key == pygame.K_ESCAPE:
                 running = False
 
+            if game_state == "menu":
+                if e.type == pygame.KEYDOWN and e.key in (pygame.K_RETURN, pygame.K_SPACE):
+                    game_state = "game"
+                elif e.type == pygame.MOUSEBUTTONDOWN and e.button == 1 and start_rect.collidepoint(e.pos):
+                    game_state = "game"
+
+        if game_state == "menu":
+            draw_start_menu(screen, start_rect)
+            pygame.display.flip()
+            continue
+
+        # --- Game state ---
         # World management
         ensure_chunks_around(snake1.x, snake1.y, radius_chunks=1)
         ensure_chunks_around(snake2.x, snake2.y, radius_chunks=1)
