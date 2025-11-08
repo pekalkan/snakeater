@@ -7,7 +7,7 @@ import pygame
 
 # ---------------- Window / Pygame ----------------
 pygame.init()
-W, H = 1600, 900
+W, H = 1366, 768
 screen = pygame.display.set_mode((W, H))
 pygame.display.set_caption("snakeater - step 2 (infinite world + food)")
 clock = pygame.time.Clock()
@@ -215,6 +215,7 @@ FOOD_GROWTH = 30.0
 BOOST_FRACTION = 0.02   # 2% of foods are boost orbs
 BOOST_MULT     = 1.5    # move at 1.5x when boosted
 BOOST_DURATION = 5.0    # boost lasts 5 seconds
+PREDATION_RATIO = 1.0    # attacker must be > (ratio × defender.length) to steal
 
 spawned_chunks = set()  # {(cx, cy)}
 foods = []              # list of dicts: {"x","y","r","kind"}
@@ -291,6 +292,9 @@ def steal_if_cross(attacker: Snake, defender: Snake, skip_recent: int = 4) -> fl
     of the defender, cut the defender there and transfer the removed
     length to the attacker. Returns the stolen length (0.0 if none)."""
     if len(attacker.points) < 2 or len(defender.points) < 2:
+        return 0.0
+    # Predation rule: larger can eat smaller; smaller cannot eat larger
+    if attacker.length <= PREDATION_RATIO * defender.length:
         return 0.0
 
     p0 = attacker.points[0]
