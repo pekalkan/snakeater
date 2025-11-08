@@ -7,7 +7,7 @@ import pygame
 
 # ---------------- Window / Pygame ----------------
 pygame.init()
-W, H = 960, 600
+W, H = 1920, 1080
 screen = pygame.display.set_mode((W, H))
 pygame.display.set_caption("snakeater - step 2 (infinite world + food)")
 clock = pygame.time.Clock()
