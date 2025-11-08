@@ -17,8 +17,8 @@ FONT = pygame.font.SysFont("Menlo", 20)
 BG_COLOR     = (18, 22, 28)
 SNAKE_BODY   = (60, 190, 90)    # green body
 SNAKE_HEAD   = (110, 240, 140)  # lighter green head highlight
-FOOD_COLOR   = (255, 205, 120)
-BOOST_COLOR  = (255, 235, 80)   # yellow speed-boost food
+FOOD_COLOR   = (255, 255, 255)
+BOOST_COLOR  = (255, 255, 255)   # boost food is also white
 HUD_BG       = (20, 20, 20, 140)  # semi-transparent dark panel
 HUD_TEXT     = (235, 245, 235)
 
