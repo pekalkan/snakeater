@@ -2,6 +2,7 @@
 
 import math
 import random
+import time
 import pygame
 
 # ---------------- Window / Pygame ----------------
@@ -17,6 +18,7 @@ BG_COLOR     = (18, 22, 28)
 SNAKE_BODY   = (60, 190, 90)    # green body
 SNAKE_HEAD   = (110, 240, 140)  # lighter green head highlight
 FOOD_COLOR   = (255, 205, 120)
+BOOST_COLOR  = (255, 235, 80)   # yellow speed-boost food
 HUD_BG       = (20, 20, 20, 140)  # semi-transparent dark panel
 HUD_TEXT     = (235, 245, 235)
 
@@ -67,6 +69,10 @@ class Snake:
         self.heading_x, self.heading_y = 1.0, 0.0   # default look direction (right)
         self.speed_current = self.base_speed
 
+        # Temporary speed boost state
+        self.boost_mul = 1.0
+        self.boost_until = 0.0
+
         # Body/trail
         self.thickness = 12              # radius of body circles
         self.length = 250.0              # total trail length in pixels
@@ -79,13 +85,17 @@ class Snake:
         dy = (keys[pygame.K_s] or keys[pygame.K_DOWN]) - (keys[pygame.K_w] or keys[pygame.K_UP])
         mag = math.hypot(dx, dy)
 
-        if mag:  # input present → update heading, move 2x speed
+        # Update heading only when there is input
+        if mag:
             self.heading_x, self.heading_y = dx / mag, dy / mag
-            self.speed_current = self.base_speed * 2.0
-        else:    # no input → cruise at base speed
-            self.speed_current = self.base_speed
 
-        # velocity follows current heading
+        # Base speed: cruise or 2x while holding input
+        intended = self.base_speed * (2.0 if mag else 1.0)
+
+        # Apply temporary boost multiplier (if any)
+        self.speed_current = intended * self.boost_mul
+
+        # Velocity follows current heading
         self.vx = self.heading_x * self.speed_current
         self.vy = self.heading_y * self.speed_current
 
@@ -144,10 +154,18 @@ class Snake:
                 self.length = self._trail_length()
                 break
 
+    def apply_boost(self, mult: float, duration: float) -> None:
+        self.boost_mul = mult
+        self.boost_until = time.time() + duration
+
     def grow(self, amount: float) -> None:
         self.length += float(amount)
 
     def update(self, dt: float) -> None:
+        # Expire temporary boost
+        if self.boost_mul != 1.0 and time.time() >= self.boost_until:
+            self.boost_mul = 1.0
+
         self.handle_input(dt)
         head = (self.x, self.y)
         if dist(head, self.points[0]) >= self.min_step:
@@ -169,9 +187,12 @@ CHUNK_SIZE = 800                   # world is split into square chunks
 FOOD_PER_CHUNK = 12
 FOOD_R = 6
 FOOD_GROWTH = 30.0                 # how much length a single food grants
+BOOST_FRACTION = 0.05            # 5% of foods are boost orbs
+BOOST_MULT     = 1.5             # move at 1.5x when boosted
+BOOST_DURATION = 5.0             # boost lasts 5 seconds
 
 spawned_chunks = set()             # {(cx, cy)}
-foods = []                         # list of dicts: {"x","y","r"}
+foods = []                         # list of dicts: {"x","y","r","kind"}
 
 def chunk_of(px: float, py: float):
     # Python's // works with negatives as floor division; adjust to int
@@ -189,7 +210,8 @@ def spawn_chunk(cx: int, cy: int) -> None:
         fx = random.uniform(left + margin, left + CHUNK_SIZE - margin)
         fy = random.uniform(top + margin, top + CHUNK_SIZE - margin)
         fr = FOOD_R
-        foods.append({"x": fx, "y": fy, "r": fr})
+        kind = "boost" if random.random() < BOOST_FRACTION else "normal"
+        foods.append({"x": fx, "y": fy, "r": fr, "kind": kind})
 
 def ensure_chunks_around(px: float, py: float, radius_chunks: int = 1) -> None:
     """Make sure the 3x3 neighborhood around the player is spawned."""
@@ -223,6 +245,8 @@ def eat_food_if_colliding(snake: Snake) -> int:
         if dist(head, (f["x"], f["y"])) <= (head_r + f["r"]):
             eaten += 1
             snake.grow(FOOD_GROWTH)
+            if f.get("kind") == "boost":
+                snake.apply_boost(BOOST_MULT, BOOST_DURATION)
         else:
             keep.append(f)
     foods = keep
@@ -231,7 +255,8 @@ def eat_food_if_colliding(snake: Snake) -> int:
 def draw_foods(surf: pygame.Surface, camx: float, camy: float) -> None:
     for f in foods:
         sx, sy = world_to_screen(f["x"], f["y"], camx, camy)
-        pygame.draw.circle(surf, FOOD_COLOR, (sx, sy), f["r"])
+        col = BOOST_COLOR if f.get("kind") == "boost" else FOOD_COLOR
+        pygame.draw.circle(surf, col, (sx, sy), f["r"])
 
 # ---------------- HUD ----------------
 def draw_hud(surf: pygame.Surface, snake: Snake, eaten_total: int) -> None:
