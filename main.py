@@ -27,6 +27,32 @@ def dist(a, b):
 def world_to_screen(px, py, camx, camy):
     return int(px - camx), int(py - camy)
 
+def segment_intersection(p0, p1, p2, p3, eps: float = 1e-9):
+    """
+    Proper intersection test between two line segments p0->p1 and p2->p3.
+    Returns (hit: bool, (ix, iy): tuple). Uses vector cross products.
+    """
+    x1, y1 = p0
+    x2, y2 = p1
+    x3, y3 = p2
+    x4, y4 = p3
+
+    dx1, dy1 = (x2 - x1), (y2 - y1)
+    dx2, dy2 = (x4 - x3), (y4 - y3)
+
+    denom = dx1 * dy2 - dy1 * dx2
+    if abs(denom) < eps:
+        return False, (0.0, 0.0)  # parallel or nearly parallel
+
+    t = ((x3 - x1) * dy2 - (y3 - y1) * dx2) / denom
+    u = ((x3 - x1) * dy1 - (y3 - y1) * dx1) / denom
+
+    if 0.0 <= t <= 1.0 and 0.0 <= u <= 1.0:
+        ix = x1 + t * dx1
+        iy = y1 + t * dy1
+        return True, (ix, iy)
+    return False, (0.0, 0.0)
+
 # ---------------- Snake ----------------
 class Snake:
     """Snake head + trail rendered along the recent path (length-limited)."""
@@ -86,6 +112,38 @@ class Snake:
                 pts[-1] = (a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t)
                 break
 
+    def _trail_length(self) -> float:
+        """Compute current polyline length of the trail."""
+        s = 0.0
+        for i in range(len(self.points) - 1):
+            s += dist(self.points[i], self.points[i + 1])
+        return s
+
+    def _self_cut_if_crossed(self) -> None:
+        """
+        If the newest head segment crosses any older segment of the trail,
+        cut the snake at the intersection point and drop the tail beyond it.
+        Also reduce self.length to the new actual trail length.
+        """
+        if len(self.points) < 3:
+            return
+        # Latest segment (head movement)
+        p0 = self.points[0]
+        p1 = self.points[1]
+
+        # Skip a few most-recent segments near the head to avoid false positives
+        skip = 6  # corresponds to ~12px with min_step=2
+        last_idx = len(self.points) - 1
+        for i in range(1 + skip, last_idx):
+            hit, ip = segment_intersection(p0, p1, self.points[i], self.points[i + 1])
+            if hit:
+                # Replace the older vertex with the exact intersection, then truncate
+                self.points[i] = ip
+                self.points = self.points[: i + 1]
+                # Permanently lose the cut-off length
+                self.length = self._trail_length()
+                break
+
     def grow(self, amount: float) -> None:
         self.length += float(amount)
 
@@ -95,6 +153,7 @@ class Snake:
         if dist(head, self.points[0]) >= self.min_step:
             self.points.insert(0, head)
         self._trim_trail_to_length()
+        self._self_cut_if_crossed()
 
     def draw(self, surf: pygame.Surface, camx: float, camy: float) -> None:
         # Draw body: circles along the trail (skip every other point for performance)
