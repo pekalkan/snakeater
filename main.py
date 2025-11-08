@@ -26,7 +26,15 @@ HUD_BG     = (20, 20, 20, 140) # translucent HUD background
 HUD_TEXT   = (235, 245, 235)
 BTN_NORMAL  = (60, 190, 90)
 BTN_HOVER   = (90, 210, 120)
+
 BTN_TEXT    = (245, 255, 245)
+
+# ---------------- Finite World Bounds ----------------
+WORLD_W, WORLD_H = 3000, 2000        # reasonable finite world size
+WORLD_LEFT  = -WORLD_W // 2
+WORLD_TOP   = -WORLD_H // 2
+WORLD_RIGHT = WORLD_LEFT + WORLD_W
+WORLD_BOTTOM= WORLD_TOP + WORLD_H
 
 # ---------------- Helpers ----------------
 def dist(a, b):
@@ -34,6 +42,9 @@ def dist(a, b):
 
 def world_to_screen(px, py, camx, camy):
     return int(px - camx), int(py - camy)
+
+def clamp(v, lo, hi):
+    return lo if v < lo else hi if v > hi else v
 
 def segment_intersection(p0, p1, p2, p3, eps: float = 1e-9):
     """
@@ -112,6 +123,9 @@ class Snake:
         self.vy = self.heading_y * self.speed_current
         self.x += self.vx * dt
         self.y += self.vy * dt
+        # Constrain to finite world bounds
+        self.x = clamp(self.x, WORLD_LEFT + self.thickness, WORLD_RIGHT - self.thickness)
+        self.y = clamp(self.y, WORLD_TOP  + self.thickness, WORLD_BOTTOM - self.thickness)
 
     def _trim_trail_to_length(self) -> None:
         total = 0.0
@@ -229,17 +243,34 @@ def chunk_of(px: float, py: float):
     cy = math.floor(py / CHUNK_SIZE)
     return int(cx), int(cy)
 
+
+def chunk_intersects_world(cx: int, cy: int) -> bool:
+    left = cx * CHUNK_SIZE
+    top = cy * CHUNK_SIZE
+    right = left + CHUNK_SIZE
+    bottom = top + CHUNK_SIZE
+    return not (right <= WORLD_LEFT or left >= WORLD_RIGHT or bottom <= WORLD_TOP or top >= WORLD_BOTTOM)
+
 def spawn_chunk(cx: int, cy: int) -> None:
-    """Create FOOD_PER_CHUNK food items randomly within a chunk.
-    Each food has BOOST_FRACTION chance to be a boost orb."""
+    """Create FOOD_PER_CHUNK food items randomly within the intersection of
+    the chunk and the finite world. Each food has BOOST_FRACTION chance to be boost."""
     global foods
     left = cx * CHUNK_SIZE
     top  = cy * CHUNK_SIZE
     margin = 20
 
+    # intersect chunk rect with world rect (leave a small margin from borders)
+    minx = max(left + margin, WORLD_LEFT + margin)
+    maxx = min(left + CHUNK_SIZE - margin, WORLD_RIGHT - margin)
+    miny = max(top  + margin, WORLD_TOP  + margin)
+    maxy = min(top  + CHUNK_SIZE - margin, WORLD_BOTTOM - margin)
+
+    if minx >= maxx or miny >= maxy:
+        return  # chunk lies outside world
+
     for _ in range(FOOD_PER_CHUNK):
-        fx = random.uniform(left + margin, left + CHUNK_SIZE - margin)
-        fy = random.uniform(top + margin, top + CHUNK_SIZE - margin)
+        fx = random.uniform(minx, maxx)
+        fy = random.uniform(miny, maxy)
         fr = FOOD_R
         kind = "boost" if random.random() < BOOST_FRACTION else "normal"
         foods.append({"x": fx, "y": fy, "r": fr, "kind": kind})
@@ -250,7 +281,7 @@ def ensure_chunks_around(px: float, py: float, radius_chunks: int = 1) -> None:
     for dy in range(-radius_chunks, radius_chunks + 1):
         for dx in range(-radius_chunks, radius_chunks + 1):
             key = (pcx + dx, pcy + dy)
-            if key not in spawned_chunks:
+            if key not in spawned_chunks and chunk_intersects_world(*key):
                 spawn_chunk(*key)
                 spawned_chunks.add(key)
 
@@ -288,6 +319,11 @@ def draw_foods(surf: pygame.Surface, camx: float, camy: float) -> None:
         sx, sy = world_to_screen(f["x"], f["y"], camx, camy)
         col = BOOST_COLOR if f.get("kind") == "boost" else FOOD_COLOR
         pygame.draw.circle(surf, col, (sx, sy), f["r"])
+
+def draw_world_border(surf: pygame.Surface, camx: float, camy: float) -> None:
+    tx, ty = world_to_screen(WORLD_LEFT, WORLD_TOP, camx, camy)
+    rect = pygame.Rect(tx, ty, WORLD_W, WORLD_H)
+    pygame.draw.rect(surf, (80, 80, 80), rect, 2)
 
 def draw_start_menu(surf: pygame.Surface, btn1_rect: pygame.Rect, btn2_rect: pygame.Rect) -> None:
     surf.fill(BG_COLOR)
@@ -432,6 +468,7 @@ def main():
 
             # Draw full-screen
             screen.fill(BG_COLOR)
+            draw_world_border(screen, camx, camy)
             draw_foods(screen, camx, camy)
             snake1.draw(screen, camx, camy)
             draw_hud_one(screen, snake1, total_eaten1, "P1")
@@ -469,6 +506,7 @@ def main():
 
         # Left view (P1)
         left.fill(BG_COLOR)
+        draw_world_border(left, cam1x, cam1y)
         draw_foods(left, cam1x, cam1y)
         snake1.draw(left, cam1x, cam1y)
         snake2.draw(left, cam1x, cam1y)
@@ -476,6 +514,7 @@ def main():
 
         # Right view (P2)
         right.fill(BG_COLOR)
+        draw_world_border(right, cam2x, cam2y)
         draw_foods(right, cam2x, cam2y)
         snake1.draw(right, cam2x, cam2y)
         snake2.draw(right, cam2x, cam2y)
