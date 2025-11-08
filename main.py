@@ -28,7 +28,7 @@ class Snake:
         self.x, self.y = x, y
         self.vx = 0.0
         self.vy = 0.0
-        self.base_speed = 240.0
+        self.base_speed = 120.0
         # Heading + current speed (cruise vs boost)
         self.heading_x, self.heading_y = 1.0, 0.0   # default look direction (right)
         self.speed_current = self.base_speed
@@ -45,9 +45,9 @@ class Snake:
         dy = (keys[pygame.K_s] or keys[pygame.K_DOWN]) - (keys[pygame.K_w] or keys[pygame.K_UP])
         mag = math.hypot(dx, dy)
 
-        if mag:  # input present → update heading, move 4x speed
+        if mag:  # input present → update heading, move 2x speed
             self.heading_x, self.heading_y = dx / mag, dy / mag
-            self.speed_current = self.base_speed * 4.0
+            self.speed_current = self.base_speed * 2.0
         else:    # no input → cruise at base speed
             self.speed_current = self.base_speed
 
