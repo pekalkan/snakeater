@@ -29,6 +29,9 @@ class Snake:
         self.vx = 0.0
         self.vy = 0.0
         self.base_speed = 240.0
+        # Heading + current speed (cruise vs boost)
+        self.heading_x, self.heading_y = 1.0, 0.0   # default look direction (right)
+        self.speed_current = self.base_speed
 
         # Body/trail
         self.thickness = 12              # radius of body circles
@@ -36,21 +39,23 @@ class Snake:
         self.min_step = 2.0              # add a new trail point if moved at least this much
         self.points = [(x, y)]           # trail points, head at index 0
 
-    def current_speed(self) -> float:
-        # Slight slowdown as we get longer (keeps the game balanced)
-        return self.base_speed / (1.0 + 0.0008 * self.length)
-
     def handle_input(self, dt: float) -> None:
         keys = pygame.key.get_pressed()
         dx = (keys[pygame.K_d] or keys[pygame.K_RIGHT]) - (keys[pygame.K_a] or keys[pygame.K_LEFT])
         dy = (keys[pygame.K_s] or keys[pygame.K_DOWN]) - (keys[pygame.K_w] or keys[pygame.K_UP])
         mag = math.hypot(dx, dy)
-        if mag:
-            dx, dy = dx / mag, dy / mag
-        spd = self.current_speed()
-        self.vx, self.vy = dx * spd, dy * spd
 
-        # No clamping → infinite world
+        if mag:  # input present → update heading, move 4x speed
+            self.heading_x, self.heading_y = dx / mag, dy / mag
+            self.speed_current = self.base_speed * 4.0
+        else:    # no input → cruise at base speed
+            self.speed_current = self.base_speed
+
+        # velocity follows current heading
+        self.vx = self.heading_x * self.speed_current
+        self.vy = self.heading_y * self.speed_current
+
+        # Infinite world (no clamping)
         self.x += self.vx * dt
         self.y += self.vy * dt
 
@@ -94,9 +99,9 @@ class Snake:
 
 # ---------------- Infinite World (chunks) ----------------
 CHUNK_SIZE = 800                   # world is split into square chunks
-FOOD_PER_CHUNK = 12               # fewer food per chunk
-FOOD_R = 4                        # uniform food radius
-FOOD_GROWTH = 30.0                # how much length a single food grants
+FOOD_PER_CHUNK = 12
+FOOD_R = 6
+FOOD_GROWTH = 30.0                 # how much length a single food grants
 
 spawned_chunks = set()             # {(cx, cy)}
 foods = []                         # list of dicts: {"x","y","r"}
@@ -163,7 +168,7 @@ def draw_foods(surf: pygame.Surface, camx: float, camy: float) -> None:
 
 # ---------------- HUD ----------------
 def draw_hud(surf: pygame.Surface, snake: Snake, eaten_total: int) -> None:
-    msg = f"Len: {int(snake.length)}   Speed: {int(snake.current_speed())}   Food eaten: {eaten_total}"
+    msg = f"Len: {int(snake.length)}   Speed: {int(snake.speed_current)}   Food eaten: {eaten_total}"
     surf.blit(FONT.render(msg, True, (240, 240, 240)), (12, 10))
 
 # ---------------- Main Loop ----------------
