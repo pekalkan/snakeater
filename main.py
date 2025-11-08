@@ -289,22 +289,24 @@ def draw_foods(surf: pygame.Surface, camx: float, camy: float) -> None:
         col = BOOST_COLOR if f.get("kind") == "boost" else FOOD_COLOR
         pygame.draw.circle(surf, col, (sx, sy), f["r"])
 
-def draw_start_menu(surf: pygame.Surface, start_rect: pygame.Rect) -> None:
+def draw_start_menu(surf: pygame.Surface, btn1_rect: pygame.Rect, btn2_rect: pygame.Rect) -> None:
     surf.fill(BG_COLOR)
     # Title and hint
     title = TITLE_FONT.render("SNAKEATER", True, HUD_TEXT)
-    hint  = FONT.render("Press Enter or Click Start", True, HUD_TEXT)
+    hint  = FONT.render("Select 1 or 2 Players (press 1/2)", True, HUD_TEXT)
     surf.blit(title, ((W - title.get_width()) // 2, int(H * 0.32)))
     surf.blit(hint,  ((W - hint.get_width())  // 2, int(H * 0.32) + title.get_height() + 12))
 
-    # Button (hover effect)
+    # Buttons (hover effect)
     mx, my = pygame.mouse.get_pos()
-    hover = start_rect.collidepoint((mx, my))
-    color = BTN_HOVER if hover else BTN_NORMAL
-    pygame.draw.rect(surf, color, start_rect, border_radius=12)
-    label = FONT.render("START", True, BTN_TEXT)
-    surf.blit(label, (start_rect.x + (start_rect.width  - label.get_width())  // 2,
-                      start_rect.y + (start_rect.height - label.get_height()) // 2))
+
+    for rect, label in ((btn1_rect, "1 PLAYER"), (btn2_rect, "2 PLAYERS")):
+        hover = rect.collidepoint((mx, my))
+        color = BTN_HOVER if hover else BTN_NORMAL
+        pygame.draw.rect(surf, color, rect, border_radius=12)
+        txt = FONT.render(label, True, BTN_TEXT)
+        surf.blit(txt, (rect.x + (rect.width  - txt.get_width())  // 2,
+                        rect.y + (rect.height - txt.get_height()) // 2))
 
 # ---------------- Steal Mechanic ----------------
 def steal_if_cross(attacker: Snake, defender: Snake, skip_recent: int = 4) -> float:
@@ -331,6 +333,18 @@ def steal_if_cross(attacker: Snake, defender: Snake, skip_recent: int = 4) -> fl
     return 0.0
 
 # ---------------- HUD ----------------
+def draw_hud_one(surf: pygame.Surface, s: Snake, eaten: int, label: str = "") -> None:
+    text = f"{label} LEN {int(s.length):4d}   SPD {int(s.speed_current):3d}   FOOD {eaten:3d}".strip()
+    txt = FONT.render(text, True, HUD_TEXT)
+    pad = 10
+    w = txt.get_width() + pad * 2
+    h = txt.get_height() + pad * 2
+    hud = pygame.Surface((w, h), pygame.SRCALPHA)
+    pygame.draw.rect(hud, HUD_BG, hud.get_rect(), border_radius=10)
+    hud.blit(txt, (pad, pad))
+    surf.blit(hud, (12, 10))
+
+
 def draw_hud_two(surf: pygame.Surface, s1: Snake, eaten1: int, s2: Snake, eaten2: int) -> None:
     # left panel (P1)
     text1 = f"P1 LEN {int(s1.length):4d}   SPD {int(s1.speed_current):3d}   FOOD {eaten1:3d}"
@@ -367,7 +381,13 @@ def main():
     global total_eaten1, total_eaten2
     running = True
     game_state = "menu"
-    start_rect = pygame.Rect((W - 260) // 2, int(H * 0.55), 260, 64)
+    game_mode = None  # "1p" or "2p"
+
+    # Two buttons centered with a small gap
+    btn_w, btn_h, gap = 260, 64, 40
+    left_x = (W - (btn_w * 2 + gap)) // 2
+    btn1_rect = pygame.Rect(left_x, int(H * 0.55), btn_w, btn_h)
+    btn2_rect = pygame.Rect(left_x + btn_w + gap, int(H * 0.55), btn_w, btn_h)
 
     while running:
         dt = clock.tick(60) / 1000.0
@@ -380,45 +400,91 @@ def main():
                 running = False
 
             if game_state == "menu":
-                if e.type == pygame.KEYDOWN and e.key in (pygame.K_RETURN, pygame.K_SPACE):
-                    game_state = "game"
-                elif e.type == pygame.MOUSEBUTTONDOWN and e.button == 1 and start_rect.collidepoint(e.pos):
-                    game_state = "game"
+                if e.type == pygame.KEYDOWN:
+                    if e.key == pygame.K_1:
+                        game_mode = "1p"; game_state = "game"
+                    elif e.key == pygame.K_2:
+                        game_mode = "2p"; game_state = "game"
+                elif e.type == pygame.MOUSEBUTTONDOWN and e.button == 1:
+                    if btn1_rect.collidepoint(e.pos):
+                        game_mode = "1p"; game_state = "game"
+                    elif btn2_rect.collidepoint(e.pos):
+                        game_mode = "2p"; game_state = "game"
 
         if game_state == "menu":
-            draw_start_menu(screen, start_rect)
+            draw_start_menu(screen, btn1_rect, btn2_rect)
             pygame.display.flip()
             continue
 
         # --- Game state ---
-        # World management
+        if game_mode == "1p":
+            # World management for P1 only
+            ensure_chunks_around(snake1.x, snake1.y, radius_chunks=1)
+            cull_far_foods(snake1.x, snake1.y, keep_radius_chunks=2)
+
+            # Update P1
+            snake1.update(dt)
+            total_eaten1 += eat_food_if_colliding(snake1)
+
+            # Camera follows P1 (full-screen)
+            camx = snake1.x - W / 2
+            camy = snake1.y - H / 2
+
+            # Draw full-screen
+            screen.fill(BG_COLOR)
+            draw_foods(screen, camx, camy)
+            snake1.draw(screen, camx, camy)
+            draw_hud_one(screen, snake1, total_eaten1, "P1")
+            pygame.display.flip()
+            continue
+
+        # --- 2P split-screen ---
+        # Spawn around both; cull around midpoint
         ensure_chunks_around(snake1.x, snake1.y, radius_chunks=1)
         ensure_chunks_around(snake2.x, snake2.y, radius_chunks=1)
-        # cull around midpoint so both players' vicinity stays populated
         midx = 0.5 * (snake1.x + snake2.x)
         midy = 0.5 * (snake1.y + snake2.y)
         cull_far_foods(midx, midy, keep_radius_chunks=2)
 
-        # Update
+        # Update both
         snake1.update(dt)
         snake2.update(dt)
         total_eaten1 += eat_food_if_colliding(snake1)
         total_eaten2 += eat_food_if_colliding(snake2)
 
-        # Steal mechanic: if one crosses the other, transfer length
-        stolen12 = steal_if_cross(snake1, snake2)
-        stolen21 = steal_if_cross(snake2, snake1)
+        # Steal mechanic both ways (still respects predation)
+        _ = steal_if_cross(snake1, snake2)
+        _ = steal_if_cross(snake2, snake1)
 
-        # Camera follows midpoint between snakes
-        camx = 0.5 * (snake1.x + snake2.x) - W / 2
-        camy = 0.5 * (snake1.y + snake2.y) - H / 2
+        # Cameras per player
+        view_w = W // 2
+        cam1x = snake1.x - view_w / 2
+        cam1y = snake1.y - H / 2
+        cam2x = snake2.x - view_w / 2
+        cam2y = snake2.y - H / 2
 
-        # Draw
-        screen.fill(BG_COLOR)
-        draw_foods(screen, camx, camy)
-        snake1.draw(screen, camx, camy)
-        snake2.draw(screen, camx, camy)
-        draw_hud_two(screen, snake1, total_eaten1, snake2, total_eaten2)
+        # Render to two view surfaces
+        left = pygame.Surface((view_w, H))
+        right = pygame.Surface((view_w, H))
+
+        # Left view (P1)
+        left.fill(BG_COLOR)
+        draw_foods(left, cam1x, cam1y)
+        snake1.draw(left, cam1x, cam1y)
+        snake2.draw(left, cam1x, cam1y)
+        draw_hud_one(left, snake1, total_eaten1, "P1")
+
+        # Right view (P2)
+        right.fill(BG_COLOR)
+        draw_foods(right, cam2x, cam2y)
+        snake1.draw(right, cam2x, cam2y)
+        snake2.draw(right, cam2x, cam2y)
+        draw_hud_one(right, snake2, total_eaten2, "P2")
+
+        # Compose to screen
+        screen.blit(left, (0, 0))
+        screen.blit(right, (view_w, 0))
+        pygame.draw.rect(screen, (30, 30, 30), pygame.Rect(view_w - 1, 0, 2, H))
         pygame.display.flip()
 
     pygame.quit()
