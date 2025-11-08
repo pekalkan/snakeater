@@ -17,6 +17,8 @@ FONT = pygame.font.SysFont("Menlo", 20)
 BG_COLOR   = (18, 22, 28)
 SNAKE_BODY = (60, 190, 90)     # green body
 SNAKE_HEAD = (110, 240, 140)   # lighter green head
+SNAKE2_BODY = (90, 160, 220)    # player 2 body (blue)
+SNAKE2_HEAD = (155, 205, 255)   # player 2 head (light blue)
 FOOD_COLOR = (255, 255, 255)   # normal food = white
 BOOST_COLOR = (255, 215, 0)    # golden boost food
 HUD_BG     = (20, 20, 20, 140) # translucent HUD background
@@ -59,7 +61,7 @@ def segment_intersection(p0, p1, p2, p3, eps: float = 1e-9):
 class Snake:
     """Snake with length-limited trail; continuous tube rendering."""
 
-    def __init__(self, x, y):
+    def __init__(self, x, y, controls, body_color, head_color):
         # Position / velocity
         self.x, self.y = float(x), float(y)
         self.vx = 0.0
@@ -69,6 +71,11 @@ class Snake:
         self.base_speed = 120.0          # cruise speed (keys not pressed)
         self.heading_x, self.heading_y = 1.0, 0.0
         self.speed_current = self.base_speed
+
+        # per-player controls and colors
+        self.controls = controls            # (left, right, up, down)
+        self.body_color = body_color
+        self.head_color = head_color
 
         # Body / trail
         self.thickness = 12              # radius for caps / half-width of tube
@@ -83,8 +90,9 @@ class Snake:
     # ---- movement & trail helpers ----
     def handle_input(self, dt: float) -> None:
         keys = pygame.key.get_pressed()
-        dx = (keys[pygame.K_d] or keys[pygame.K_RIGHT]) - (keys[pygame.K_a] or keys[pygame.K_LEFT])
-        dy = (keys[pygame.K_s] or keys[pygame.K_DOWN]) - (keys[pygame.K_w] or keys[pygame.K_UP])
+        left, right, up, down = self.controls
+        dx = (1 if keys[right] else 0) - (1 if keys[left] else 0)
+        dy = (1 if keys[down] else 0) - (1 if keys[up] else 0)
         mag = math.hypot(dx, dy)
 
         if mag:
@@ -181,9 +189,9 @@ class Snake:
         # Classic dot-trail rendering (smooth thanks to _push_head_samples)
         for p in self.points:
             sx, sy = world_to_screen(p[0], p[1], camx, camy)
-            pygame.draw.circle(surf, SNAKE_BODY, (sx, sy), self.thickness)
+            pygame.draw.circle(surf, self.body_color, (sx, sy), self.thickness)
         hx, hy = world_to_screen(self.x, self.y, camx, camy)
-        pygame.draw.circle(surf, SNAKE_HEAD, (hx, hy), self.thickness + 2)
+        pygame.draw.circle(surf, self.head_color, (hx, hy), self.thickness + 2)
 
 # ---------------- Infinite World (chunks) ----------------
 CHUNK_SIZE = 800
@@ -264,26 +272,40 @@ def draw_foods(surf: pygame.Surface, camx: float, camy: float) -> None:
         pygame.draw.circle(surf, col, (sx, sy), f["r"])
 
 # ---------------- HUD ----------------
-def draw_hud(surf: pygame.Surface, snake: Snake, eaten_total: int) -> None:
-    text = f"LEN {int(snake.length):4d}   SPD {int(snake.speed_current):3d}   FOOD {eaten_total:3d}"
-    txt = FONT.render(text, True, HUD_TEXT)
-
+def draw_hud_two(surf: pygame.Surface, s1: Snake, eaten1: int, s2: Snake, eaten2: int) -> None:
+    # left panel (P1)
+    text1 = f"P1 LEN {int(s1.length):4d}   SPD {int(s1.speed_current):3d}   FOOD {eaten1:3d}"
+    txt1 = FONT.render(text1, True, HUD_TEXT)
     pad = 10
-    w = txt.get_width() + pad * 2
-    h = txt.get_height() + pad * 2
+    w1 = txt1.get_width() + pad * 2
+    h1 = txt1.get_height() + pad * 2
+    hud1 = pygame.Surface((w1, h1), pygame.SRCALPHA)
+    pygame.draw.rect(hud1, HUD_BG, hud1.get_rect(), border_radius=10)
+    hud1.blit(txt1, (pad, pad))
+    surf.blit(hud1, (12, 10))
 
-    hud = pygame.Surface((w, h), pygame.SRCALPHA)
-    pygame.draw.rect(hud, HUD_BG, hud.get_rect(), border_radius=10)
-    hud.blit(txt, (pad, pad))
-
-    surf.blit(hud, (12, 10))
+    # right panel (P2)
+    text2 = f"P2 LEN {int(s2.length):4d}   SPD {int(s2.speed_current):3d}   FOOD {eaten2:3d}"
+    txt2 = FONT.render(text2, True, HUD_TEXT)
+    w2 = txt2.get_width() + pad * 2
+    h2 = txt2.get_height() + pad * 2
+    hud2 = pygame.Surface((w2, h2), pygame.SRCALPHA)
+    pygame.draw.rect(hud2, HUD_BG, hud2.get_rect(), border_radius=10)
+    hud2.blit(txt2, (pad, pad))
+    surf.blit(hud2, (W - w2 - 12, 10))
 
 # ---------------- Main Loop ----------------
-snake = Snake(0.0, 0.0)   # start at world origin
-total_eaten = 0
+controls_p1 = (pygame.K_a, pygame.K_d, pygame.K_w, pygame.K_s)              # left, right, up, down
+controls_p2 = (pygame.K_LEFT, pygame.K_RIGHT, pygame.K_UP, pygame.K_DOWN)   # left, right, up, down
+
+snake1 = Snake(-120.0, 0.0, controls_p1, SNAKE_BODY, SNAKE_HEAD)
+snake2 = Snake( 120.0, 0.0, controls_p2, SNAKE2_BODY, SNAKE2_HEAD)
+
+total_eaten1 = 0
+total_eaten2 = 0
 
 def main():
-    global total_eaten
+    global total_eaten1, total_eaten2
     running = True
     while running:
         dt = clock.tick(60) / 1000.0
@@ -294,22 +316,29 @@ def main():
                 running = False
 
         # World management
-        ensure_chunks_around(snake.x, snake.y, radius_chunks=1)
-        cull_far_foods(snake.x, snake.y, keep_radius_chunks=2)
+        ensure_chunks_around(snake1.x, snake1.y, radius_chunks=1)
+        ensure_chunks_around(snake2.x, snake2.y, radius_chunks=1)
+        # cull around midpoint so both players' vicinity stays populated
+        midx = 0.5 * (snake1.x + snake2.x)
+        midy = 0.5 * (snake1.y + snake2.y)
+        cull_far_foods(midx, midy, keep_radius_chunks=2)
 
         # Update
-        snake.update(dt)
-        total_eaten += eat_food_if_colliding(snake)
+        snake1.update(dt)
+        snake2.update(dt)
+        total_eaten1 += eat_food_if_colliding(snake1)
+        total_eaten2 += eat_food_if_colliding(snake2)
 
-        # Camera follows snake head
-        camx = snake.x - W / 2
-        camy = snake.y - H / 2
+        # Camera follows midpoint between snakes
+        camx = 0.5 * (snake1.x + snake2.x) - W / 2
+        camy = 0.5 * (snake1.y + snake2.y) - H / 2
 
         # Draw
         screen.fill(BG_COLOR)
         draw_foods(screen, camx, camy)
-        snake.draw(screen, camx, camy)
-        draw_hud(screen, snake, total_eaten)
+        snake1.draw(screen, camx, camy)
+        snake2.draw(screen, camx, camy)
+        draw_hud_two(screen, snake1, total_eaten1, snake2, total_eaten2)
         pygame.display.flip()
 
     pygame.quit()
