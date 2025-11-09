@@ -970,6 +970,7 @@ def main():
         if snake1.is_in_poison: draw_poison_blink(left)
         draw_shrink_notice(left)
         draw_hud_one(left, snake1, total_eaten1, "P1")
+        draw_minimap(left, [snake1, snake2])
 
         # Right view (P2)
         right.fill(BG_COLOR)
@@ -980,6 +981,7 @@ def main():
         if snake2.is_in_poison: draw_poison_blink(right)
         draw_shrink_notice(right)
         draw_hud_one(right, snake2, total_eaten2, "P2")
+        draw_minimap(right, [snake1, snake2])
 
         # Draw overlay for win/lose
         if game_over and loser == "P1":
@@ -993,7 +995,6 @@ def main():
         screen.blit(left, (0, 0))
         screen.blit(right, (view_w, 0))
         pygame.draw.rect(screen, (30, 30, 30), pygame.Rect(view_w - 1, 0, 2, H))
-        draw_minimap(screen, [snake1, snake2])
         pygame.display.flip()
 
     pygame.quit()
