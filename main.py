@@ -301,7 +301,7 @@ EAT_ON_HEAD_COLLISION = True   # if True, head contact lets the larger snake eat
 START_LENGTH = 250.0           # respawn starting trail length (matches Snake.__init__)
 
  # --- Shields (green protection) ---
-SHIELD_FRACTION = BOOST_FRACTION  # spawn as often as boosts
+SHIELD_FRACTION = BOOST_FRACTION * 0.5  # spawn half as often as boosts
 SHIELD_DURATION = 5.0             # each pickup grants 5 s protection
 
 # --- Defeat by length ---
@@ -373,8 +373,8 @@ def spawn_chunk(cx: int, cy: int) -> None:
 
 # ---------------- Spawn Balancer (per chunk) ----------------
 TARGET_PER_CHUNK = FOOD_PER_CHUNK  # desired items per active chunk
-MIN_BOOST_PER_CHUNK = 0            # guarantee at least one boost per active chunk
-MIN_SHIELD_PER_CHUNK = 0           # guarantee at least one shield per active chunk
+MIN_BOOST_PER_CHUNK = 0            # no per-chunk boost guarantee
+MIN_SHIELD_PER_CHUNK = 0           # no per-chunk shield guarantee (lets rate drop by ~50%)
 
 def spawn_items_in_chunk(cx: int, cy: int, n: int, kind: str) -> None:
     if n <= 0:
@@ -515,12 +515,16 @@ def draw_foods(surf: pygame.Surface, camx: float, camy: float) -> None:
         sx, sy = world_to_screen(f["x"], f["y"], camx, camy)
         k = f.get("kind")
         if k == "boost":
-            col = BOOST_COLOR
+            pygame.draw.circle(surf, BOOST_COLOR, (sx, sy), f["r"])  # gold filled
         elif k == "shield":
-            col = SHIELD_COLOR
+            # Bigger, pulsing, outlined to stand out clearly
+            base_r = f["r"] + 3
+            pulse = int(2 * (0.5 + 0.5 * math.sin(time.time() * 6)))  # 0..2
+            pr = max(1, base_r + pulse)
+            pygame.draw.circle(surf, SHIELD_COLOR, (sx, sy), pr)       # bright fill
+            pygame.draw.circle(surf, (245, 255, 245), (sx, sy), pr, 2) # subtle outline
         else:
-            col = FOOD_COLOR
-        pygame.draw.circle(surf, col, (sx, sy), f["r"])
+            pygame.draw.circle(surf, FOOD_COLOR, (sx, sy), f["r"])     # normal white
 
 def draw_world_border(surf: pygame.Surface, camx: float, camy: float) -> None:
     cx, cy = world_to_screen(0, 0, camx, camy)
