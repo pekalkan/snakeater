@@ -27,14 +27,19 @@ HUD_TEXT   = (235, 245, 235)
 BTN_NORMAL  = (60, 190, 90)
 BTN_HOVER   = (90, 210, 120)
 
+
 BTN_TEXT    = (245, 255, 245)
+SHIELD_COLOR   = (120, 255, 120)  # green shield orb
+POISON_WARN_BG = (160, 30, 30, 160)
+POISON_WARN_TEXT = (255, 230, 230)
 
 # ---------------- Finite World Bounds ----------------
-WORLD_W, WORLD_H = 3000, 2000        # reasonable finite world size
+WORLD_W, WORLD_H = 4000, 2400        # larger finite world size
 WORLD_LEFT  = -WORLD_W // 2
 WORLD_TOP   = -WORLD_H // 2
 WORLD_RIGHT = WORLD_LEFT + WORLD_W
 WORLD_BOTTOM= WORLD_TOP + WORLD_H
+OUTSIDE_DECAY_RATE = 180.0  # length lost per second while outside
 
 # ---------------- Helpers ----------------
 def dist(a, b):
@@ -102,6 +107,10 @@ class Snake:
         self.boost_mul = 1.0
         self.boost_until = 0.0
 
+        # Shield / poison state
+        self.shield_charges = 0
+        self.is_in_poison = False
+
     # ---- movement & trail helpers ----
     def handle_input(self, dt: float) -> None:
         keys = pygame.key.get_pressed()
@@ -123,9 +132,6 @@ class Snake:
         self.vy = self.heading_y * self.speed_current
         self.x += self.vx * dt
         self.y += self.vy * dt
-        # Constrain to finite world bounds
-        self.x = clamp(self.x, WORLD_LEFT + self.thickness, WORLD_RIGHT - self.thickness)
-        self.y = clamp(self.y, WORLD_TOP  + self.thickness, WORLD_BOTTOM - self.thickness)
 
     def _trim_trail_to_length(self) -> None:
         total = 0.0
@@ -215,6 +221,16 @@ class Snake:
         self._push_head_samples((self.x, self.y))
         self._trim_trail_to_length()
         self._self_cut_if_crossed()
+
+        # Poison zone handling (outside the world border)
+        inside = (WORLD_LEFT + self.thickness <= self.x <= WORLD_RIGHT - self.thickness and
+                  WORLD_TOP  + self.thickness <= self.y <= WORLD_BOTTOM - self.thickness)
+        self.is_in_poison = not inside
+        if self.is_in_poison:
+            old_len = self.length
+            self.length = max(0.0, self.length - OUTSIDE_DECAY_RATE * dt)
+            if self.length < old_len:
+                self._trim_trail_to_length()
 
     def draw(self, surf: pygame.Surface, camx: float, camy: float) -> None:
         # Classic dot-trail rendering (smooth thanks to _push_head_samples)
