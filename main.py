@@ -40,6 +40,15 @@ WORLD_RIGHT = WORLD_LEFT + WORLD_W
 WORLD_BOTTOM= WORLD_TOP + WORLD_H
 OUTSIDE_DECAY_RATE = 180.0  # length lost per second while outside
 
+# --- Safe zone shrinking ---
+SHRINK_INTERVAL = 60.0      # seconds between shrinks
+SHRINK_FACTOR = 0.8         # each shrink scales world size by 80%
+SHRINK_NOTICE_SECS = 3.0    # on-screen warning duration
+MIN_WORLD_W, MIN_WORLD_H = 1600, 900  # do not shrink below this (keeps area playable)
+SHRINK_MESSAGE = "SAFE ZONE IS SHRINKING! Move inward!"
+# runtime state for notices
+shrink_notice_until = 0.0
+
 # ---------------- Helpers ----------------
 def dist(a, b):
     return math.hypot(a[0] - b[0], a[1] - b[1])
@@ -316,6 +325,19 @@ def random_spawn_inside_world(margin: int = 120):
     y = random.uniform(WORLD_TOP + margin, WORLD_BOTTOM - margin)
     return x, y
 
+def shrink_world_centered(factor: float) -> None:
+    """Shrink the safe world rectangle around the origin by `factor` (e.g., 0.8)."""
+    global WORLD_W, WORLD_H, WORLD_LEFT, WORLD_RIGHT, WORLD_TOP, WORLD_BOTTOM
+    new_w = max(MIN_WORLD_W, WORLD_W * factor)
+    new_h = max(MIN_WORLD_H, WORLD_H * factor)
+    if new_w == WORLD_W and new_h == WORLD_H:
+        return  # already at minimum size
+    WORLD_W, WORLD_H = new_w, new_h
+    WORLD_LEFT  = -WORLD_W / 2
+    WORLD_TOP   = -WORLD_H / 2
+    WORLD_RIGHT = WORLD_LEFT + WORLD_W
+    WORLD_BOTTOM= WORLD_TOP + WORLD_H
+
 def spawn_chunk(cx: int, cy: int) -> None:
     """Create FOOD_PER_CHUNK food items randomly within the intersection of
     the chunk and the finite world. Each food has chance to be boost/shield."""
@@ -498,7 +520,7 @@ def draw_foods(surf: pygame.Surface, camx: float, camy: float) -> None:
 
 def draw_world_border(surf: pygame.Surface, camx: float, camy: float) -> None:
     tx, ty = world_to_screen(WORLD_LEFT, WORLD_TOP, camx, camy)
-    rect = pygame.Rect(tx, ty, WORLD_W, WORLD_H)
+    rect = pygame.Rect(tx, ty, int(WORLD_W), int(WORLD_H))
     pygame.draw.rect(surf, (80, 80, 80), rect, 2)
 
 # --- Poison Zone Blink Warning ---
@@ -512,6 +534,18 @@ def draw_poison_blink(surf: pygame.Surface) -> None:
     shadow = TITLE_FONT.render(msg, True, (30, 0, 0))
     x = (surf.get_width() - txt.get_width()) // 2
     y = 18
+    surf.blit(shadow, (x + 2, y + 2))
+    surf.blit(txt, (x, y))
+
+def draw_shrink_notice(surf: pygame.Surface) -> None:
+    """Transient orange warning when the safe zone shrinks."""
+    if time.time() >= shrink_notice_until:
+        return
+    msg = SHRINK_MESSAGE
+    txt = TITLE_FONT.render(msg, True, (255, 200, 80))
+    shadow = TITLE_FONT.render(msg, True, (25, 20, 0))
+    x = (surf.get_width() - txt.get_width()) // 2
+    y = 70
     surf.blit(shadow, (x + 2, y + 2))
     surf.blit(txt, (x, y))
 
@@ -653,6 +687,10 @@ def main():
     game_state = "menu"
     game_mode = None  # "1p" or "2p"
 
+    # Safe zone shrink scheduling
+    next_shrink_time = time.time() + SHRINK_INTERVAL
+    global shrink_notice_until
+
     # Two buttons centered with a small gap
     btn_w, btn_h, gap = 260, 64, 40
     left_x = (W - (btn_w * 2 + gap)) // 2
@@ -661,6 +699,13 @@ def main():
 
     while running:
         dt = clock.tick(60) / 1000.0
+
+        # Periodic safe zone shrink
+        now = time.time()
+        if now >= next_shrink_time:
+            shrink_world_centered(SHRINK_FACTOR)
+            shrink_notice_until = now + SHRINK_NOTICE_SECS
+            next_shrink_time = now + SHRINK_INTERVAL
 
         # Events
         for e in pygame.event.get():
@@ -707,6 +752,7 @@ def main():
             draw_foods(screen, camx, camy)
             snake1.draw(screen, camx, camy)
             if snake1.is_in_poison: draw_poison_blink(screen)
+            draw_shrink_notice(screen)
             draw_hud_one(screen, snake1, total_eaten1, "P1")
             pygame.display.flip()
             continue
@@ -752,6 +798,7 @@ def main():
         snake1.draw(left, cam1x, cam1y)
         snake2.draw(left, cam1x, cam1y)
         if snake1.is_in_poison: draw_poison_blink(left)
+        draw_shrink_notice(left)
         draw_hud_one(left, snake1, total_eaten1, "P1")
 
         # Right view (P2)
@@ -761,6 +808,7 @@ def main():
         snake1.draw(right, cam2x, cam2y)
         snake2.draw(right, cam2x, cam2y)
         if snake2.is_in_poison: draw_poison_blink(right)
+        draw_shrink_notice(right)
         draw_hud_one(right, snake2, total_eaten2, "P2")
 
         # Compose to screen
