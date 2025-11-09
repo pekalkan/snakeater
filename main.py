@@ -425,6 +425,21 @@ def draw_world_border(surf: pygame.Surface, camx: float, camy: float) -> None:
     rect = pygame.Rect(tx, ty, WORLD_W, WORLD_H)
     pygame.draw.rect(surf, (80, 80, 80), rect, 2)
 
+
+# --- Poison Zone Blink Warning ---
+def draw_poison_blink(surf: pygame.Surface) -> None:
+    """Blinking red warning text shown when player is outside the world (poison zone)."""
+    # Blink ~2Hz: visible one half-cycle, hidden the other half
+    if (int(time.time() * 2) % 2) != 0:
+        return
+    msg = "WARNING, POISON!"
+    txt = TITLE_FONT.render(msg, True, (255, 60, 60))
+    shadow = TITLE_FONT.render(msg, True, (30, 0, 0))
+    x = (surf.get_width() - txt.get_width()) // 2
+    y = 18
+    surf.blit(shadow, (x + 2, y + 2))
+    surf.blit(txt, (x, y))
+
 def draw_start_menu(surf: pygame.Surface, btn1_rect: pygame.Rect, btn2_rect: pygame.Rect) -> None:
     surf.fill(BG_COLOR)
     # Title and hint
@@ -571,6 +586,7 @@ def main():
             draw_world_border(screen, camx, camy)
             draw_foods(screen, camx, camy)
             snake1.draw(screen, camx, camy)
+            if snake1.is_in_poison: draw_poison_blink(screen)
             draw_hud_one(screen, snake1, total_eaten1, "P1")
             pygame.display.flip()
             continue
@@ -610,6 +626,7 @@ def main():
         draw_foods(left, cam1x, cam1y)
         snake1.draw(left, cam1x, cam1y)
         snake2.draw(left, cam1x, cam1y)
+        if snake1.is_in_poison: draw_poison_blink(left)
         draw_hud_one(left, snake1, total_eaten1, "P1")
 
         # Right view (P2)
@@ -618,6 +635,7 @@ def main():
         draw_foods(right, cam2x, cam2y)
         snake1.draw(right, cam2x, cam2y)
         snake2.draw(right, cam2x, cam2y)
+        if snake2.is_in_poison: draw_poison_blink(right)
         draw_hud_one(right, snake2, total_eaten2, "P2")
 
         # Compose to screen
