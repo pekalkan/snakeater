@@ -1,14 +1,11 @@
-"""snakeater – continuous tube snake, infinite world, food + boost + shield"""
+"""snakeater – continuous tube snake, finite shrinking CIRCLE, food + boost + shield (no audio)"""
 
 import math
 import random
 import time
 import pygame
-from pathlib import Path
 
 # ---------------- Window / Pygame ----------------
-# ---------------- Window / Pygame ----------------
-pygame.mixer.pre_init(44100, -16, 2, 512)
 pygame.init()
 W, H = 1366, 768
 screen = pygame.display.set_mode((W, H))
@@ -16,58 +13,6 @@ pygame.display.set_caption("snakeater - shields added")
 clock = pygame.time.Clock()
 FONT = pygame.font.SysFont("Menlo", 20)
 TITLE_FONT = pygame.font.SysFont("Menlo", 48)
-
-# ---------------- Audio (Music & SFX) ----------------
-# ---------------- Paths & Audio (Music & SFX) ----------------
-BASE_DIR = Path(__file__).resolve().parent
-ASSET_MUSIC = BASE_DIR / "assets" / "bg_music.ogg"   # OGG stream recommended
-ASSET_POISON_SFX = BASE_DIR / "assets" / "poison.wav"  # short WAV for instant playback
-
-class AudioManager:
-    def __init__(self, music_path: Path, poison_path: Path):
-        self.ok = False
-        self.music_ok = False
-        self.sfx_ok = False
-        self.muted = False
-        self.poison = None
-        try:
-            pygame.mixer.init()
-            self.ok = True
-            # Music (single streaming channel)
-            try:
-                pygame.mixer.music.load(str(music_path))
-                pygame.mixer.music.set_volume(0.45)
-                pygame.mixer.music.play(-1)  # loop forever
-                self.music_ok = True
-            except Exception as e:
-                print("Music load/play failed:", e)
-            # SFX (short effects)
-            try:
-                self.poison = pygame.mixer.Sound(str(poison_path))
-                self.poison.set_volume(0.8)
-                self.sfx_ok = True
-            except Exception as e:
-                self.poison = None
-                print("Poison SFX load failed:", e)
-        except Exception as e:
-            print("Audio init failed:", e)
-
-    def play_poison(self):
-        if self.sfx_ok and self.poison and not self.muted:
-            try:
-                self.poison.play()
-            except Exception:
-                pass
-
-    def toggle_mute(self):
-        self.muted = not self.muted
-        vol = 0.0 if self.muted else 0.45
-        try:
-            pygame.mixer.music.set_volume(vol)
-        except Exception:
-            pass
-
-audio = AudioManager(ASSET_MUSIC, ASSET_POISON_SFX)
 
 # ---------------- Colors ----------------
 BG_COLOR   = (18, 22, 28)
@@ -87,20 +32,18 @@ SHIELD_COLOR   = (120, 255, 120)  # green shield orb
 POISON_WARN_BG = (160, 30, 30, 160)
 POISON_WARN_TEXT = (255, 230, 230)
 
-# ---------------- Finite World Bounds ----------------
-WORLD_W, WORLD_H = 4320, 2430        # 10% smaller (still 16:9)
-WORLD_LEFT  = -WORLD_W // 2
-WORLD_TOP   = -WORLD_H // 2
-WORLD_RIGHT = WORLD_LEFT + WORLD_W
-WORLD_BOTTOM= WORLD_TOP + WORLD_H
-WORLD_W_INIT, WORLD_H_INIT = WORLD_W, WORLD_H  # remember initial size to reset on restart
-OUTSIDE_DECAY_RATE = 180.0  # length lost per second while outside
+# ---------------- Finite World Bounds (CIRCULAR) ----------------
+# Keep the original rectangle numbers only to infer an initial radius.
+_RECT_W, _RECT_H = 4320, 2430
+SAFE_R = int(min(_RECT_W, _RECT_H) // 2)   # initial safe radius (inscribed circle)
+SAFE_R_INIT = SAFE_R                       # for restart
+OUTSIDE_DECAY_RATE = 180.0                 # length lost per second while outside
 
 # --- Safe zone shrinking ---
 SHRINK_INTERVAL = 60.0      # seconds between shrinks
 SHRINK_FACTOR = 0.8         # each shrink scales world size by 80%
 SHRINK_NOTICE_SECS = 3.0    # on-screen warning duration
-MIN_WORLD_W, MIN_WORLD_H = 1600, 900  # do not shrink below this (keeps area playable)
+MIN_WORLD_R = 800  # do not shrink below this radius (keeps area playable)
 SHRINK_MESSAGE = "SHRINKING"
 # runtime state for notices
 shrink_notice_until = 0.0
@@ -175,7 +118,6 @@ class Snake:
         self.shield_charges = 0
         self.is_in_poison = False
         self.shield_until = 0.0          # NEW: timed shield
-        self.just_entered_poison = False
 
     # ---- movement & trail helpers ----
     def handle_input(self, dt: float) -> None:
@@ -319,12 +261,9 @@ class Snake:
         self._trim_trail_to_length()
         self._self_cut_if_crossed()
 
-        # Poison zone handling (outside the world border) + edge-trigger flag
-        prev_in_poison = self.is_in_poison
-        inside = (WORLD_LEFT + self.thickness <= self.x <= WORLD_RIGHT - self.thickness and
-                  WORLD_TOP  + self.thickness <= self.y <= WORLD_BOTTOM - self.thickness)
+        # Poison zone handling (outside the world border)
+        inside = (math.hypot(self.x, self.y) + self.thickness) <= SAFE_R
         self.is_in_poison = not inside
-        self.just_entered_poison = (not prev_in_poison) and self.is_in_poison
         if self.is_in_poison and not self.is_shield_active():
             old_len = self.length
             self.length = max(0.0, self.length - OUTSIDE_DECAY_RATE * dt)
@@ -359,14 +298,12 @@ PREDATION_RATIO = 1.0    # attacker must be > (ratio × defender.length) to stea
 EAT_ON_HEAD_COLLISION = True   # if True, head contact lets the larger snake eat the smaller
 START_LENGTH = 250.0           # respawn starting trail length (matches Snake.__init__)
 
-# --- Shields (green protection) ---
+ # --- Shields (green protection) ---
 SHIELD_FRACTION = BOOST_FRACTION  # spawn as often as boosts
 SHIELD_DURATION = 5.0             # each pickup grants 5 s protection
 
-# When a snake is eaten and its remaining length would be below 3 head diameters, it loses
-HEADS_TO_LOSE = 3.0  # "head length" is taken as head diameter = thickness * 2
-# Length-based defeat rule
-LOSE_LENGTH = 60.0   # if a snake's length ≤ 60, it loses the round
+# --- Defeat by length ---
+LOSE_LENGTH = 60.0  # if a snake length <= 60, it loses
 
 spawned_chunks = set()  # {(cx, cy)}
 foods = []              # list of dicts: {"x","y","r","kind"}
@@ -377,60 +314,60 @@ def chunk_of(px: float, py: float):
     return int(cx), int(cy)
 
 def chunk_intersects_world(cx: int, cy: int) -> bool:
+    """Approximate: a chunk intersects the circular world if its rectangle gets within SAFE_R of the origin."""
     left = cx * CHUNK_SIZE
     top = cy * CHUNK_SIZE
     right = left + CHUNK_SIZE
     bottom = top + CHUNK_SIZE
-    return not (right <= WORLD_LEFT or left >= WORLD_RIGHT or bottom <= WORLD_TOP or top >= WORLD_BOTTOM)
+    # closest point on rect to (0,0)
+    qx = clamp(0, left, right)
+    qy = clamp(0, top, bottom)
+    return math.hypot(qx, qy) <= SAFE_R
 
 def random_spawn_inside_world(margin: int = 120):
-    """Return a random (x,y) within the world bounds, away from edges by 'margin'."""
-    x = random.uniform(WORLD_LEFT + margin, WORLD_RIGHT - margin)
-    y = random.uniform(WORLD_TOP + margin, WORLD_BOTTOM - margin)
-    return x, y
+    """Return a random (x,y) strictly inside the circular world, away from edge by 'margin'."""
+    r = random.uniform(margin, max(margin, SAFE_R - margin))
+    theta = random.uniform(0.0, 2.0 * math.pi)
+    return r * math.cos(theta), r * math.sin(theta)
 
 def shrink_world_centered(factor: float) -> None:
-    """Shrink the safe world rectangle around the origin by `factor` (e.g., 0.8)."""
-    global WORLD_W, WORLD_H, WORLD_LEFT, WORLD_RIGHT, WORLD_TOP, WORLD_BOTTOM
-    new_w = max(MIN_WORLD_W, WORLD_W * factor)
-    new_h = max(MIN_WORLD_H, WORLD_H * factor)
-    if new_w == WORLD_W and new_h == WORLD_H:
-        return  # already at minimum size
-    WORLD_W, WORLD_H = new_w, new_h
-    WORLD_LEFT  = -WORLD_W / 2
-    WORLD_TOP   = -WORLD_H / 2
-    WORLD_RIGHT = WORLD_LEFT + WORLD_W
-    WORLD_BOTTOM= WORLD_TOP + WORLD_H
+    global SAFE_R
+    new_r = max(MIN_WORLD_R, int(SAFE_R * factor))
+    if new_r == SAFE_R:
+        return
+    SAFE_R = new_r
 
 def spawn_chunk(cx: int, cy: int) -> None:
-    """Create FOOD_PER_CHUNK food items randomly within the intersection of
-    the chunk and the finite world. Each food has chance to be boost/shield."""
+    """Spawn items inside the part of the chunk that lies within the circular world."""
     global foods
     left = cx * CHUNK_SIZE
-    top  = cy * CHUNK_SIZE
+    top = cy * CHUNK_SIZE
     margin = 20
-
-    # intersect chunk rect with world rect (leave a small margin from borders)
-    minx = max(left + margin, WORLD_LEFT + margin)
-    maxx = min(left + CHUNK_SIZE - margin, WORLD_RIGHT - margin)
-    miny = max(top  + margin, WORLD_TOP  + margin)
-    maxy = min(top  + CHUNK_SIZE - margin, WORLD_BOTTOM - margin)
-
+    minx = left + margin
+    maxx = left + CHUNK_SIZE - margin
+    miny = top + margin
+    maxy = top + CHUNK_SIZE - margin
     if minx >= maxx or miny >= maxy:
-        return  # chunk lies outside world
-
+        return
     for _ in range(FOOD_PER_CHUNK):
-        fx = random.uniform(minx, maxx)
-        fy = random.uniform(miny, maxy)
-        fr = FOOD_R
-        r = random.random()
-        if r < BOOST_FRACTION:
-            kind = "boost"
-        elif r < BOOST_FRACTION + SHIELD_FRACTION:
-            kind = "shield"
-        else:
-            kind = "normal"
-        foods.append({"x": fx, "y": fy, "r": fr, "kind": kind})
+        placed = False
+        for __ in range(10):  # try up to 10 times to land inside the circle
+            fx = random.uniform(minx, maxx)
+            fy = random.uniform(miny, maxy)
+            if math.hypot(fx, fy) <= SAFE_R - 10:
+                r = random.random()
+                if r < BOOST_FRACTION:
+                    kind = "boost"
+                elif r < BOOST_FRACTION + SHIELD_FRACTION:
+                    kind = "shield"
+                else:
+                    kind = "normal"
+                foods.append({"x": fx, "y": fy, "r": FOOD_R, "kind": kind})
+                placed = True
+                break
+        if not placed:
+            # if the chunk is almost entirely outside, skip silently
+            pass
 
 # ---------------- Spawn Balancer (per chunk) ----------------
 TARGET_PER_CHUNK = FOOD_PER_CHUNK  # desired items per active chunk
@@ -438,23 +375,24 @@ MIN_BOOST_PER_CHUNK = 1            # guarantee at least one boost per active chu
 MIN_SHIELD_PER_CHUNK = 1           # guarantee at least one shield per active chunk
 
 def spawn_items_in_chunk(cx: int, cy: int, n: int, kind: str) -> None:
-    """Spawn exactly n items of given kind inside chunk, respecting world bounds."""
     if n <= 0:
         return
     left = cx * CHUNK_SIZE
-    top  = cy * CHUNK_SIZE
+    top = cy * CHUNK_SIZE
     margin = 20
-    # intersect chunk rect with world rect
-    minx = max(left + margin, WORLD_LEFT + margin)
-    maxx = min(left + CHUNK_SIZE - margin, WORLD_RIGHT - margin)
-    miny = max(top  + margin, WORLD_TOP  + margin)
-    maxy = min(top  + CHUNK_SIZE - margin, WORLD_BOTTOM - margin)
+    minx = left + margin
+    maxx = left + CHUNK_SIZE - margin
+    miny = top + margin
+    maxy = top + CHUNK_SIZE - margin
     if minx >= maxx or miny >= maxy:
         return
     for _ in range(n):
-        fx = random.uniform(minx, maxx)
-        fy = random.uniform(miny, maxy)
-        foods.append({"x": fx, "y": fy, "r": FOOD_R, "kind": kind})
+        for __ in range(10):
+            fx = random.uniform(minx, maxx)
+            fy = random.uniform(miny, maxy)
+            if math.hypot(fx, fy) <= SAFE_R - 10:
+                foods.append({"x": fx, "y": fy, "r": FOOD_R, "kind": kind})
+                break
 
 SPAWN_RADIUS_CHUNKS = 1
 SPAWN_INTERVAL = 0.9
@@ -583,9 +521,8 @@ def draw_foods(surf: pygame.Surface, camx: float, camy: float) -> None:
         pygame.draw.circle(surf, col, (sx, sy), f["r"])
 
 def draw_world_border(surf: pygame.Surface, camx: float, camy: float) -> None:
-    tx, ty = world_to_screen(WORLD_LEFT, WORLD_TOP, camx, camy)
-    rect = pygame.Rect(tx, ty, int(WORLD_W), int(WORLD_H))
-    pygame.draw.rect(surf, (80, 80, 80), rect, 2)
+    cx, cy = world_to_screen(0, 0, camx, camy)
+    pygame.draw.circle(surf, (80, 80, 80), (cx, cy), int(SAFE_R), 2)
 
 # --- Poison Zone Blink Warning ---
 def draw_poison_blink(surf: pygame.Surface) -> None:
@@ -613,9 +550,8 @@ def draw_shrink_notice(surf: pygame.Surface) -> None:
     surf.blit(shadow, (x + 2, y + 2))
     surf.blit(txt, (x, y))
 
-# --- Game over overlay for round-ending messages ---
+# --- Overlay: Game Over / Win/Lose ---
 def draw_game_over_overlay(surf: pygame.Surface, title: str) -> None:
-    """Centered game-over banner with a shadow."""
     t = TITLE_FONT.render(title, True, (255, 230, 230))
     ts = TITLE_FONT.render(title, True, (40, 0, 0))
     x = (surf.get_width() - t.get_width()) // 2
@@ -707,30 +643,20 @@ def eat_if_head_collides(attacker: Snake, defender: Snake) -> bool:
     defender.respawn(sx, sy)
     return True
 
-# --- Eat with elimination rule ---
+# --- Elimination-style predation (no respawn) ---
 def eat_and_maybe_eliminate(attacker: Snake, defender: Snake) -> str:
     """
-    Perform head-collision eat if conditions allow. If defender's length is at or below
-    (HEADS_TO_LOSE × head_diameter), the defender loses the round.
     Returns: "none" (no eat) or "attacker_win" (defender eliminated; no respawn).
     """
     if not EAT_ON_HEAD_COLLISION:
         return "none"
-    # Defender shield blocks being eaten
     if defender.is_shield_active():
         return "none"
-    # Only larger snake can eat the smaller one
     if attacker.length <= PREDATION_RATIO * defender.length:
         return "none"
-    # Require head overlap with defender's tube/head
     if not head_hits_snake(attacker, defender, skip_recent=0):
         return "none"
-
-    # Elimination check: if defender is already very short, it loses instead of respawning
-    if defender.length <= LOSE_LENGTH:
-        return "attacker_win"
-
-    # No respawn on eat: end round immediately with attacker as winner
+    # direct elimination (no respawn): attacker absorbs and round ends
     attacker.length += defender.length
     return "attacker_win"
 
@@ -783,17 +709,15 @@ total_eaten1 = 0
 total_eaten2 = 0
 
 def main():
-    global total_eaten1, total_eaten2, foods, spawned_chunks, snake1, snake2, WORLD_W, WORLD_H, WORLD_LEFT, WORLD_TOP, WORLD_RIGHT, WORLD_BOTTOM, shrink_notice_until
+    global total_eaten1, total_eaten2, SAFE_R, shrink_notice_until, snake1, snake2
     running = True
     game_state = "menu"
     game_mode = None  # "1p" or "2p"
-
-    game_over = False       # if True, freeze updates and show overlays
-    loser = None            # "P1" or "P2"
+    game_over = False
+    loser = None
 
     # Safe zone shrink scheduling
     next_shrink_time = time.time() + SHRINK_INTERVAL
-    global shrink_notice_until
 
     # Two buttons centered with a small gap
     btn_w, btn_h, gap = 260, 64, 40
@@ -817,31 +741,23 @@ def main():
                 running = False
             elif e.type == pygame.KEYDOWN and e.key == pygame.K_ESCAPE:
                 running = False
-            elif e.type == pygame.KEYDOWN and e.key == pygame.K_m:
-                # Toggle music mute/unmute
-                audio.toggle_mute()
             elif e.type == pygame.KEYDOWN and e.key == pygame.K_r:
-                # Restart the round at any time. Keep current game_mode if set.
-                foods = []
+                # Restart: reset world, foods, snakes, timers, flags
+                foods.clear()
                 spawned_chunks.clear()
                 total_eaten1 = 0
                 total_eaten2 = 0
-                # Reset rectangular world size
-                WORLD_W, WORLD_H = WORLD_W_INIT, WORLD_H_INIT
-                WORLD_LEFT  = -WORLD_W // 2
-                WORLD_TOP   = -WORLD_H // 2
-                WORLD_RIGHT = WORLD_LEFT + WORLD_W
-                WORLD_BOTTOM= WORLD_TOP + WORLD_H
-                # Recreate snakes
+                # reset world radius
+                SAFE_R = SAFE_R_INIT
+                # reset snakes
                 snake1 = Snake(-120.0, 0.0, controls_p1, SNAKE_BODY, SNAKE_HEAD)
                 snake2 = Snake( 120.0, 0.0, controls_p2, SNAKE2_BODY, SNAKE2_HEAD)
-                # Reset shrink timers & notices
+                # timers & flags
                 next_shrink_time = time.time() + SHRINK_INTERVAL
                 shrink_notice_until = 0.0
-                # Clear game-over state
                 game_over = False
                 loser = None
-                # If a mode is selected, jump straight into game; otherwise stay at menu
+                # preserve current mode (stay in game if selected)
                 if game_mode in ("1p", "2p"):
                     game_state = "game"
                 else:
@@ -874,8 +790,6 @@ def main():
 
             # Update P1
             snake1.update(dt)
-            if getattr(snake1, "just_entered_poison", False):
-                audio.play_poison()
             total_eaten1 += eat_food_if_colliding(snake1)
 
             # Camera follows P1 (full-screen)
@@ -902,39 +816,36 @@ def main():
         cull_far_foods(midx, midy, keep_radius_chunks=2)
         periodic_spawn_around([(snake1.x, snake1.y), (snake2.x, snake2.y)])
 
-        if not game_over:
-            # Update both
-            snake1.update(dt)
-            snake2.update(dt)
-            if getattr(snake1, "just_entered_poison", False):
-                audio.play_poison()
-            if getattr(snake2, "just_entered_poison", False):
-                audio.play_poison()
-            total_eaten1 += eat_food_if_colliding(snake1)
-            total_eaten2 += eat_food_if_colliding(snake2)
+        # Update both
+        snake1.update(dt)
+        snake2.update(dt)
+        total_eaten1 += eat_food_if_colliding(snake1)
+        total_eaten2 += eat_food_if_colliding(snake2)
 
-            # Full-eat with elimination rule
+        # Head-on predation (elimination logic)
+        if not game_over:
             res = eat_and_maybe_eliminate(snake1, snake2)
             if res == "attacker_win":
                 game_over = True
                 loser = "P2"
-            elif res == "none":
+            else:
                 res2 = eat_and_maybe_eliminate(snake2, snake1)
                 if res2 == "attacker_win":
                     game_over = True
                     loser = "P1"
 
-            # If round not over, allow cutting/stealing interactions
-            if not game_over:
-                _ = steal_if_cross(snake1, snake2)
-                _ = steal_if_cross(snake2, snake1)
-                # Length-based defeat: if a snake shrinks to ≤ LOSE_LENGTH, it loses
-                if snake1.length <= LOSE_LENGTH:
-                    game_over = True
-                    loser = "P1"
-                elif snake2.length <= LOSE_LENGTH:
-                    game_over = True
-                    loser = "P2"
+        # Steal mechanic both ways – shield blocks being cut
+        _ = steal_if_cross(snake1, snake2)
+        _ = steal_if_cross(snake2, snake1)
+
+        # Length-based defeat
+        if not game_over:
+            if snake1.length <= LOSE_LENGTH:
+                game_over = True
+                loser = "P1"
+            elif snake2.length <= LOSE_LENGTH:
+                game_over = True
+                loser = "P2"
 
         # Cameras per player
         view_w = W // 2
@@ -956,8 +867,6 @@ def main():
         if snake1.is_in_poison: draw_poison_blink(left)
         draw_shrink_notice(left)
         draw_hud_one(left, snake1, total_eaten1, "P1")
-        if game_over and loser == "P1":
-            draw_game_over_overlay(left, "YOU LOSE")
 
         # Right view (P2)
         right.fill(BG_COLOR)
@@ -968,7 +877,13 @@ def main():
         if snake2.is_in_poison: draw_poison_blink(right)
         draw_shrink_notice(right)
         draw_hud_one(right, snake2, total_eaten2, "P2")
-        if game_over and loser == "P2":
+
+        # Draw overlay for win/lose
+        if game_over and loser == "P1":
+            draw_game_over_overlay(left, "YOU LOSE")
+            draw_game_over_overlay(right, "YOU WIN")
+        elif game_over and loser == "P2":
+            draw_game_over_overlay(left, "YOU WIN")
             draw_game_over_overlay(right, "YOU LOSE")
 
         # Compose to screen
