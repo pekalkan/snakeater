@@ -396,9 +396,54 @@ def spawn_items_in_chunk(cx: int, cy: int, n: int, kind: str) -> None:
                 foods.append({"x": fx, "y": fy, "r": FOOD_R, "kind": kind})
                 break
 
+
 SPAWN_RADIUS_CHUNKS = 1
 SPAWN_INTERVAL = 0.9
 last_density_spawn = 0.0
+
+# --- Proximity-based shield assurance (soft guarantee near each player) ---
+NEAR_SHIELD_RADIUS = 900.0    # check radius around each player (pixels)
+NEAR_SHIELD_TARGET = 1        # aim to have at least this many shields within radius
+NEAR_SHIELD_COOLDOWN = 5.0    # at most one proximity spawn per this many seconds (global)
+last_near_shield_spawn = 0.0
+
+def _count_shields_near(px: float, py: float, radius: float) -> int:
+    r2 = radius * radius
+    c = 0
+    for f in foods:
+        if f.get("kind") == "shield":
+            dx = f["x"] - px
+            dy = f["y"] - py
+            if (dx * dx + dy * dy) <= r2:
+                c += 1
+    return c
+
+def _spawn_shield_near(px: float, py: float) -> bool:
+    """Try to spawn one shield near (px,py) but still inside the safe circle."""
+    # Try a few random polar offsets; keep within SAFE_R with a margin
+    for _ in range(24):
+        ang = random.uniform(0.0, 2.0 * math.pi)
+        dist_min = 200.0
+        dist_max = min(700.0, max(220.0, SAFE_R - 60.0))
+        d = random.uniform(dist_min, dist_max)
+        fx = px + math.cos(ang) * d
+        fy = py + math.sin(ang) * d
+        if math.hypot(fx, fy) <= SAFE_R - 10.0:
+            foods.append({"x": fx, "y": fy, "r": FOOD_R, "kind": "shield"})
+            return True
+    return False
+
+def maybe_spawn_nearby_shields(points: list[tuple[float, float]]) -> None:
+    global last_near_shield_spawn
+    now = time.time()
+    if now - last_near_shield_spawn < NEAR_SHIELD_COOLDOWN:
+        return
+    # If any player lacks a nearby shield, spawn one near that player and cooldown
+    for (px, py) in points:
+        if _count_shields_near(px, py, NEAR_SHIELD_RADIUS) < NEAR_SHIELD_TARGET:
+            if _spawn_shield_near(px, py):
+                last_near_shield_spawn = now
+                break
 
 def periodic_spawn_around(points: list[tuple[float, float]]) -> None:
     """Every SPAWN_INTERVAL seconds, ensure each chunk near `points`
@@ -794,6 +839,8 @@ def main():
             cull_far_foods(snake1.x, snake1.y, keep_radius_chunks=2)
             periodic_spawn_around([(snake1.x, snake1.y)])
 
+            maybe_spawn_nearby_shields([(snake1.x, snake1.y)])
+
             # Update P1
             snake1.update(dt)
             total_eaten1 += eat_food_if_colliding(snake1)
@@ -821,6 +868,8 @@ def main():
         midy = 0.5 * (snake1.y + snake2.y)
         cull_far_foods(midx, midy, keep_radius_chunks=2)
         periodic_spawn_around([(snake1.x, snake1.y), (snake2.x, snake2.y)])
+
+        maybe_spawn_nearby_shields([(snake1.x, snake1.y), (snake2.x, snake2.y)])
 
         # Update both
         snake1.update(dt)
