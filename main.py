@@ -1,5 +1,7 @@
 """snakeater – continuous tube snake, infinite world, food + boost"""
 
+"""snakeater – continuous tube snake, infinite world, food + boost"""
+
 import math
 import random
 import time
@@ -27,14 +29,13 @@ HUD_TEXT   = (235, 245, 235)
 BTN_NORMAL  = (60, 190, 90)
 BTN_HOVER   = (90, 210, 120)
 
-
 BTN_TEXT    = (245, 255, 245)
 SHIELD_COLOR   = (120, 255, 120)  # green shield orb
 POISON_WARN_BG = (160, 30, 30, 160)
 POISON_WARN_TEXT = (255, 230, 230)
 
 # ---------------- Finite World Bounds ----------------
-WORLD_W, WORLD_H = 14400, 8100       # 3x larger safe area (keeps 16:9)
+WORLD_W, WORLD_H = 4800, 2700        # wider safe area (16:9)
 WORLD_LEFT  = -WORLD_W // 2
 WORLD_TOP   = -WORLD_H // 2
 WORLD_RIGHT = WORLD_LEFT + WORLD_W
@@ -212,6 +213,25 @@ class Snake:
             self.boost_mul = mult
             self.boost_until = now + duration
 
+    # -------- NEW: respawn after being eaten --------
+    def respawn(self, x: float, y: float) -> None:
+        """Reset this snake at (x,y) with starting stats after being eaten."""
+        self.x, self.y = float(x), float(y)
+        self.vx = 0.0
+        self.vy = 0.0
+        self.heading_x, self.heading_y = 1.0, 0.0
+        self.speed_current = self.base_speed
+
+        # Reset trail to a single point and restore starting length
+        self.points = [(self.x, self.y)]
+        self.length = START_LENGTH
+
+        # Clear temporary states
+        self.boost_mul = 1.0
+        self.boost_until = 0.0
+        self.shield_charges = 0
+        self.is_in_poison = False
+
     def update(self, dt: float) -> None:
         # Expire temporary boost
         if self.boost_mul != 1.0 and time.time() >= self.boost_until:
@@ -251,6 +271,10 @@ BOOST_MULT     = 1.5    # move at 1.5x when boosted
 BOOST_DURATION = 5.0    # boost lasts 5 seconds
 PREDATION_RATIO = 1.0    # attacker must be > (ratio × defender.length) to steal
 
+# --- Head-on predation: bigger snake can fully eat smaller on contact ---
+EAT_ON_HEAD_COLLISION = True   # if True, head contact lets the larger snake eat the smaller
+START_LENGTH = 250.0           # respawn starting trail length (matches Snake.__init__)
+
 spawned_chunks = set()  # {(cx, cy)}
 foods = []              # list of dicts: {"x","y","r","kind"}
 
@@ -259,13 +283,19 @@ def chunk_of(px: float, py: float):
     cy = math.floor(py / CHUNK_SIZE)
     return int(cx), int(cy)
 
-
 def chunk_intersects_world(cx: int, cy: int) -> bool:
     left = cx * CHUNK_SIZE
     top = cy * CHUNK_SIZE
     right = left + CHUNK_SIZE
     bottom = top + CHUNK_SIZE
     return not (right <= WORLD_LEFT or left >= WORLD_RIGHT or bottom <= WORLD_TOP or top >= WORLD_BOTTOM)
+
+# -------- NEW: safe random spawn inside world --------
+def random_spawn_inside_world(margin: int = 120):
+    """Return a random (x,y) within the world bounds, away from edges by 'margin'."""
+    x = random.uniform(WORLD_LEFT + margin, WORLD_RIGHT - margin)
+    y = random.uniform(WORLD_TOP + margin, WORLD_BOTTOM - margin)
+    return x, y
 
 def spawn_chunk(cx: int, cy: int) -> None:
     """Create FOOD_PER_CHUNK food items randomly within the intersection of
@@ -284,15 +314,12 @@ def spawn_chunk(cx: int, cy: int) -> None:
     if minx >= maxx or miny >= maxy:
         return  # chunk lies outside world
 
-    boosts_created = 0
     for _ in range(FOOD_PER_CHUNK):
         fx = random.uniform(minx, maxx)
         fy = random.uniform(miny, maxy)
         fr = FOOD_R
         kind = "boost" if random.random() < BOOST_FRACTION else "normal"
-        if kind == "boost": boosts_created += 1
         foods.append({"x": fx, "y": fy, "r": fr, "kind": kind})
-    if boosts_created > 0: spawn_items_in_chunk(cx, cy, boosts_created, "shield")
 
 # ---------------- Spawn Balancer (per chunk) ----------------
 TARGET_PER_CHUNK = FOOD_PER_CHUNK  # desired items per active chunk
@@ -323,13 +350,13 @@ last_density_spawn = 0.0
 
 def periodic_spawn_around(points: list[tuple[float, float]]) -> None:
     """Every SPAWN_INTERVAL seconds, ensure each chunk near `points`
-    reaches TARGET_PER_CHUNK total items, at least MIN_BOOST_PER_CHUNK boosts,
-    and shields count equals boosts count."""
+    reaches TARGET_PER_CHUNK total items and at least MIN_BOOST_PER_CHUNK boosts."""
     global last_density_spawn
     now = time.time()
     if now - last_density_spawn < SPAWN_INTERVAL:
         return
 
+    # Build the set of nearby chunk keys to maintain
     keys: set[tuple[int, int]] = set()
     for (px, py) in points:
         pcx, pcy = chunk_of(px, py)
@@ -343,48 +370,36 @@ def periodic_spawn_around(points: list[tuple[float, float]]) -> None:
         last_density_spawn = now
         return
 
+    # Ensure chunks exist
     for key in keys:
         if key not in spawned_chunks:
             spawn_chunk(*key)
             spawned_chunks.add(key)
 
+    # Count totals and boosts per key
     total_counts: dict[tuple[int, int], int] = {k: 0 for k in keys}
     boost_counts: dict[tuple[int, int], int] = {k: 0 for k in keys}
-    shield_counts: dict[tuple[int, int], int] = {k: 0 for k in keys}
     for f in foods:
         k = chunk_of(f["x"], f["y"])
         if k in total_counts:
             total_counts[k] += 1
-            kind = f.get("kind")
-            if kind == "boost":
+            if f.get("kind") == "boost":
                 boost_counts[k] += 1
-            elif kind == "shield":
-                shield_counts[k] += 1
 
+    # Spawn deficits: guarantee at least MIN_BOOST_PER_CHUNK boosts
     for key in keys:
         total = total_counts[key]
         boosts = boost_counts[key]
-        shields = shield_counts[key]
         desired_total = TARGET_PER_CHUNK
+        # Aim for fraction, but guarantee a minimum of one boost
         desired_boosts = max(MIN_BOOST_PER_CHUNK, int(round(desired_total * BOOST_FRACTION)))
-
         missing_total = max(0, desired_total - total)
-
-        # ensure at least desired_boosts
         missing_boosts = max(0, desired_boosts - boosts)
+
         if missing_boosts > 0:
             spawn_items_in_chunk(key[0], key[1], missing_boosts, "boost")
-            boosts += missing_boosts
-            missing_total = max(0, missing_total - missing_boosts)
+            missing_total -= missing_boosts
 
-        # ensure shields == boosts
-        missing_shields = max(0, boosts - shields)
-        if missing_shields > 0:
-            spawn_items_in_chunk(key[0], key[1], missing_shields, "shield")
-            shields += missing_shields
-            missing_total = max(0, missing_total - missing_shields)
-
-        # fill the remainder with normal
         if missing_total > 0:
             spawn_items_in_chunk(key[0], key[1], missing_total, "normal")
 
@@ -421,14 +436,9 @@ def eat_food_if_colliding(snake: Snake) -> int:
     for f in foods:
         if dist(head, (f["x"], f["y"])) <= (head_r + f["r"]):
             eaten += 1
-            kind = f.get("kind")
-            if kind == "boost":
-                snake.grow(FOOD_GROWTH)
+            snake.grow(FOOD_GROWTH)
+            if f.get("kind") == "boost":
                 snake.apply_boost(BOOST_MULT, BOOST_DURATION)
-            elif kind == "shield":
-                snake.shield_charges += 1
-            else:  # normal
-                snake.grow(FOOD_GROWTH)
         else:
             keep.append(f)
     foods = keep
@@ -437,14 +447,13 @@ def eat_food_if_colliding(snake: Snake) -> int:
 def draw_foods(surf: pygame.Surface, camx: float, camy: float) -> None:
     for f in foods:
         sx, sy = world_to_screen(f["x"], f["y"], camx, camy)
-        col = BOOST_COLOR if f.get("kind") == "boost" else (SHIELD_COLOR if f.get("kind") == "shield" else FOOD_COLOR)
+        col = BOOST_COLOR if f.get("kind") == "boost" else FOOD_COLOR
         pygame.draw.circle(surf, col, (sx, sy), f["r"])
 
 def draw_world_border(surf: pygame.Surface, camx: float, camy: float) -> None:
     tx, ty = world_to_screen(WORLD_LEFT, WORLD_TOP, camx, camy)
     rect = pygame.Rect(tx, ty, WORLD_W, WORLD_H)
     pygame.draw.rect(surf, (80, 80, 80), rect, 2)
-
 
 # --- Poison Zone Blink Warning ---
 def draw_poison_blink(surf: pygame.Surface) -> None:
@@ -494,18 +503,49 @@ def steal_if_cross(attacker: Snake, defender: Snake, skip_recent: int = 4) -> fl
     p1 = attacker.points[1]
     last_idx = len(defender.points) - 1
 
-    # skip a few most‑recent defender segments near its head
+    # skip a few most-recent defender segments near its head
     for i in range(skip_recent, last_idx):
         hit, ip = segment_intersection(p0, p1, defender.points[i], defender.points[i + 1])
         if hit:
-            # Defender shield negates the cut once
-            if getattr(defender, "shield_charges", 0) > 0:
-                defender.shield_charges -= 1
-                return 0.0
             stolen = defender.cut_from_index(i, ip)
             attacker.length += stolen
             return stolen
     return 0.0
+
+# -------- NEW: head-on predation helpers --------
+def head_hits_snake(attacker: Snake, defender: Snake, skip_recent: int = 0) -> bool:
+    """Return True if attacker's head circle overlaps any point of defender's tube."""
+    head = (attacker.x, attacker.y)
+    threshold = attacker.thickness + defender.thickness
+    if len(defender.points) <= skip_recent:
+        return False
+    for p in defender.points[skip_recent:]:
+        if dist(head, p) <= threshold:
+            return True
+    return False
+
+def eat_if_head_collides(attacker: Snake, defender: Snake) -> bool:
+    """
+    If the larger attacker's head collides with the defender's tube/head,
+    the attacker eats the defender completely.
+    Transfers defender's total length to attacker and respawns defender.
+    Returns True if an eat occurred (defender was respawned).
+    """
+    if not EAT_ON_HEAD_COLLISION:
+        return False
+    # Only larger snake can eat the smaller one
+    if attacker.length <= PREDATION_RATIO * defender.length:
+        return False
+    if not head_hits_snake(attacker, defender, skip_recent=0):
+        return False
+
+    # Transfer all remaining length
+    attacker.length += defender.length
+
+    # Respawn defender at a new random location inside the world
+    sx, sy = random_spawn_inside_world()
+    defender.respawn(sx, sy)
+    return True
 
 # ---------------- HUD ----------------
 def draw_hud_one(surf: pygame.Surface, s: Snake, eaten: int, label: str = "") -> None:
@@ -518,7 +558,6 @@ def draw_hud_one(surf: pygame.Surface, s: Snake, eaten: int, label: str = "") ->
     pygame.draw.rect(hud, HUD_BG, hud.get_rect(), border_radius=10)
     hud.blit(txt, (pad, pad))
     surf.blit(hud, (12, 10))
-
 
 def draw_hud_two(surf: pygame.Surface, s1: Snake, eaten1: int, s2: Snake, eaten2: int) -> None:
     # left panel (P1)
@@ -596,7 +635,6 @@ def main():
             # World management for P1 only
             ensure_chunks_around(snake1.x, snake1.y, radius_chunks=1)
             cull_far_foods(snake1.x, snake1.y, keep_radius_chunks=2)
-            periodic_spawn_around([(snake1.x, snake1.y)])
 
             # Update P1
             snake1.update(dt)
@@ -623,13 +661,16 @@ def main():
         midx = 0.5 * (snake1.x + snake2.x)
         midy = 0.5 * (snake1.y + snake2.y)
         cull_far_foods(midx, midy, keep_radius_chunks=2)
-        periodic_spawn_around([(snake1.x, snake1.y), (snake2.x, snake2.y)])
 
         # Update both
         snake1.update(dt)
         snake2.update(dt)
         total_eaten1 += eat_food_if_colliding(snake1)
         total_eaten2 += eat_food_if_colliding(snake2)
+
+        # -------- NEW: head-on predation (full eat) --------
+        if not eat_if_head_collides(snake1, snake2):
+            _ = eat_if_head_collides(snake2, snake1)
 
         # Steal mechanic both ways (still respects predation)
         _ = steal_if_cross(snake1, snake2)
