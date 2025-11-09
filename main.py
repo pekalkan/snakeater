@@ -38,7 +38,7 @@ WORLD_LEFT  = -WORLD_W // 2
 WORLD_TOP   = -WORLD_H // 2
 WORLD_RIGHT = WORLD_LEFT + WORLD_W
 WORLD_BOTTOM= WORLD_TOP + WORLD_H
-WORLD_W_INIT, WORLD_H_INIT = WORLD_W, WORLD_H  # remember initial size for restarts
+WORLD_W_INIT, WORLD_H_INIT = WORLD_W, WORLD_H  # remember initial size to reset on restart
 OUTSIDE_DECAY_RATE = 180.0  # length lost per second while outside
 
 # --- Safe zone shrinking ---
@@ -305,6 +305,11 @@ START_LENGTH = 250.0           # respawn starting trail length (matches Snake.__
 SHIELD_FRACTION = BOOST_FRACTION  # spawn as often as boosts
 SHIELD_DURATION = 5.0             # each pickup grants 5 s protection
 
+# When a snake is eaten and its remaining length would be below 3 head diameters, it loses
+HEADS_TO_LOSE = 3.0  # "head length" is taken as head diameter = thickness * 2
+# Length-based defeat rule
+LOSE_LENGTH = 60.0   # if a snake's length ≤ 60, it loses the round
+
 spawned_chunks = set()  # {(cx, cy)}
 foods = []              # list of dicts: {"x","y","r","kind"}
 
@@ -550,6 +555,16 @@ def draw_shrink_notice(surf: pygame.Surface) -> None:
     surf.blit(shadow, (x + 2, y + 2))
     surf.blit(txt, (x, y))
 
+# --- Game over overlay for round-ending messages ---
+def draw_game_over_overlay(surf: pygame.Surface, title: str) -> None:
+    """Centered game-over banner with a shadow."""
+    t = TITLE_FONT.render(title, True, (255, 230, 230))
+    ts = TITLE_FONT.render(title, True, (40, 0, 0))
+    x = (surf.get_width() - t.get_width()) // 2
+    y = surf.get_height() // 2 - t.get_height()
+    surf.blit(ts, (x + 2, y + 2))
+    surf.blit(t,  (x, y))
+
 def draw_start_menu(surf: pygame.Surface, btn1_rect: pygame.Rect, btn2_rect: pygame.Rect) -> None:
     surf.fill(BG_COLOR)
     # Title and hint
@@ -634,6 +649,36 @@ def eat_if_head_collides(attacker: Snake, defender: Snake) -> bool:
     defender.respawn(sx, sy)
     return True
 
+# --- Eat with elimination rule ---
+def eat_and_maybe_eliminate(attacker: Snake, defender: Snake) -> str:
+    """
+    Perform head-collision eat if conditions allow. If defender's length is at or below
+    (HEADS_TO_LOSE × head_diameter), the defender loses the round.
+    Returns: "none" (no eat), "ate" (ate + defender respawned), or "attacker_win" (defender eliminated).
+    """
+    if not EAT_ON_HEAD_COLLISION:
+        return "none"
+    # Defender shield blocks being eaten
+    if defender.is_shield_active():
+        return "none"
+    # Only larger snake can eat the smaller one
+    if attacker.length <= PREDATION_RATIO * defender.length:
+        return "none"
+    # Require head overlap with defender's tube/head
+    if not head_hits_snake(attacker, defender, skip_recent=0):
+        return "none"
+
+    # Elimination check: if defender is already very short, it loses instead of respawning
+    head_diameter = defender.thickness * 2.0
+    if defender.length <= HEADS_TO_LOSE * head_diameter:
+        return "attacker_win"
+
+    # Normal full-eat: transfer defender's remaining length, then respawn defender
+    attacker.length += defender.length
+    sx, sy = random_spawn_inside_world()
+    defender.respawn(sx, sy)
+    return "ate"
+
 # ---------------- HUD ----------------
 def draw_hud_one(surf: pygame.Surface, s: Snake, eaten: int, label: str = "") -> None:
     sh_left = max(0, int(s.shield_until - time.time()))
@@ -688,6 +733,9 @@ def main():
     game_state = "menu"
     game_mode = None  # "1p" or "2p"
 
+    game_over = False       # if True, freeze updates and show overlays
+    loser = None            # "P1" or "P2"
+
     # Safe zone shrink scheduling
     next_shrink_time = time.time() + SHRINK_INTERVAL
     global shrink_notice_until
@@ -720,7 +768,7 @@ def main():
                 spawned_chunks.clear()
                 total_eaten1 = 0
                 total_eaten2 = 0
-                # Reset world to initial size
+                # Reset rectangular world size
                 WORLD_W, WORLD_H = WORLD_W_INIT, WORLD_H_INIT
                 WORLD_LEFT  = -WORLD_W // 2
                 WORLD_TOP   = -WORLD_H // 2
@@ -732,11 +780,15 @@ def main():
                 # Reset shrink timers & notices
                 next_shrink_time = time.time() + SHRINK_INTERVAL
                 shrink_notice_until = 0.0
+                # Clear game-over state
+                game_over = False
+                loser = None
                 # If a mode is selected, jump straight into game; otherwise stay at menu
                 if game_mode in ("1p", "2p"):
                     game_state = "game"
                 else:
                     game_state = "menu"
+                continue
 
             if game_state == "menu":
                 if e.type == pygame.KEYDOWN:
@@ -790,19 +842,35 @@ def main():
         cull_far_foods(midx, midy, keep_radius_chunks=2)
         periodic_spawn_around([(snake1.x, snake1.y), (snake2.x, snake2.y)])
 
-        # Update both
-        snake1.update(dt)
-        snake2.update(dt)
-        total_eaten1 += eat_food_if_colliding(snake1)
-        total_eaten2 += eat_food_if_colliding(snake2)
+        if not game_over:
+            # Update both
+            snake1.update(dt)
+            snake2.update(dt)
+            total_eaten1 += eat_food_if_colliding(snake1)
+            total_eaten2 += eat_food_if_colliding(snake2)
 
-        # Head-on predation (full eat) – shield blocks being eaten
-        if not eat_if_head_collides(snake1, snake2):
-            _ = eat_if_head_collides(snake2, snake1)
+            # Full-eat with elimination rule
+            res = eat_and_maybe_eliminate(snake1, snake2)
+            if res == "attacker_win":
+                game_over = True
+                loser = "P2"
+            elif res == "none":
+                res2 = eat_and_maybe_eliminate(snake2, snake1)
+                if res2 == "attacker_win":
+                    game_over = True
+                    loser = "P1"
 
-        # Steal mechanic both ways – shield blocks being cut
-        _ = steal_if_cross(snake1, snake2)
-        _ = steal_if_cross(snake2, snake1)
+            # If round not over, allow cutting/stealing interactions
+            if not game_over:
+                _ = steal_if_cross(snake1, snake2)
+                _ = steal_if_cross(snake2, snake1)
+                # Length-based defeat: if a snake shrinks to ≤ LOSE_LENGTH, it loses
+                if snake1.length <= LOSE_LENGTH:
+                    game_over = True
+                    loser = "P1"
+                elif snake2.length <= LOSE_LENGTH:
+                    game_over = True
+                    loser = "P2"
 
         # Cameras per player
         view_w = W // 2
@@ -824,6 +892,8 @@ def main():
         if snake1.is_in_poison: draw_poison_blink(left)
         draw_shrink_notice(left)
         draw_hud_one(left, snake1, total_eaten1, "P1")
+        if game_over and loser == "P1":
+            draw_game_over_overlay(left, "YOU LOSE")
 
         # Right view (P2)
         right.fill(BG_COLOR)
@@ -834,6 +904,8 @@ def main():
         if snake2.is_in_poison: draw_poison_blink(right)
         draw_shrink_notice(right)
         draw_hud_one(right, snake2, total_eaten2, "P2")
+        if game_over and loser == "P2":
+            draw_game_over_overlay(right, "YOU LOSE")
 
         # Compose to screen
         screen.blit(left, (0, 0))
