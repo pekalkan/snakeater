@@ -29,8 +29,15 @@ BTN_HOVER   = (90, 210, 120)
 
 BTN_TEXT    = (245, 255, 245)
 SHIELD_COLOR   = (120, 255, 120)  # green shield orb
+
 POISON_WARN_BG = (160, 30, 30, 160)
 POISON_WARN_TEXT = (255, 230, 230)
+
+# ---------------- Minimap (bottom-right overlay) ----------------
+MINIMAP_SIZE   = 180        # square panel size (pixels)
+MINIMAP_MARGIN = 14         # margin from screen edges
+MINIMAP_BG     = (20, 20, 20, 170)
+MINIMAP_BORDER = (120, 120, 120)
 
 # ---------------- Finite World Bounds (CIRCULAR) ----------------
 # Keep the original rectangle numbers only to infer an initial radius.
@@ -134,8 +141,12 @@ class Snake:
 
         # 2x while holding input, otherwise cruise at base speed
         intended = self.base_speed * (2.0 if mag else 1.0)
-        # Apply temporary boost multiplier (if any)
-        self.speed_current = intended * self.boost_mul
+        # Size penalty: bigger snake moves slower (0.1% per food eaten; shields don't add length)
+        size_penalty = 1.0 - max(0.0, (self.length - START_LENGTH)) * SPEED_DECAY_PER_LENGTH
+        if size_penalty < MIN_SIZE_SPEED_FACTOR:
+            size_penalty = MIN_SIZE_SPEED_FACTOR
+        # Apply penalties and temporary boost
+        self.speed_current = intended * size_penalty * self.boost_mul
 
         # Advance
         self.vx = self.heading_x * self.speed_current
@@ -290,8 +301,8 @@ CHUNK_SIZE = 800
 FOOD_PER_CHUNK = 3
 FOOD_R = 6
 FOOD_GROWTH = 30.0
-# Speed decay: each eaten food slows the snake by 0.1%
-SPEED_DECAY_PER_FOOD = 0.001
+# Speed decay: each eaten food slows the snake by 10% (TEST)
+SPEED_DECAY_PER_FOOD = 0.10
 SPEED_DECAY_PER_LENGTH = SPEED_DECAY_PER_FOOD / FOOD_GROWTH  # per pixel of length gained
 MIN_SIZE_SPEED_FACTOR = 0.5  # minimum cap: 50% of intended speed
 BOOST_FRACTION = 0.05   # 5% of foods are boost orbs
@@ -592,6 +603,7 @@ def draw_poison_blink(surf: pygame.Surface) -> None:
     surf.blit(shadow, (x + 2, y + 2))
     surf.blit(txt, (x, y))
 
+
 def draw_shrink_notice(surf: pygame.Surface) -> None:
     """Transient orange warning when the safe zone shrinks."""
     if time.time() >= shrink_notice_until:
@@ -603,6 +615,42 @@ def draw_shrink_notice(surf: pygame.Surface) -> None:
     y = 70
     surf.blit(shadow, (x + 2, y + 2))
     surf.blit(txt, (x, y))
+
+# --- Minimap overlay (bottom-right) ---
+def draw_minimap(surf: pygame.Surface, snakes: list[Snake]) -> None:
+    """Render a simple circular minimap of the world with snake head dots in the
+    bottom-right corner of the final screen buffer `surf`. World center is (0,0)."""
+    # Panel placement
+    panel_w = panel_h = MINIMAP_SIZE
+    x0 = surf.get_width()  - panel_w - MINIMAP_MARGIN
+    y0 = surf.get_height() - panel_h - MINIMAP_MARGIN
+
+    # Panel surface with alpha background
+    panel = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
+    pygame.draw.rect(panel, MINIMAP_BG, panel.get_rect(), border_radius=10)
+
+    # Minimap center and radius
+    cx = panel_w // 2
+    cy = panel_h // 2
+    # Fit the world circle into the panel with small padding
+    pad = 10
+    r_max = (min(panel_w, panel_h) // 2) - pad
+    if SAFE_R <= 0:
+        return
+    scale = r_max / float(SAFE_R)
+
+    # World border (scaled circle)
+    pygame.draw.circle(panel, MINIMAP_BORDER, (cx, cy), int(SAFE_R * scale), 2)
+
+    # Plot snake heads as small dots
+    for i, s in enumerate(snakes):
+        px = int(cx + s.x * scale)
+        py = int(cy + s.y * scale)
+        color = s.head_color  # use each snake's head color
+        pygame.draw.circle(panel, color, (px, py), 4)
+
+    # Blit panel to screen
+    surf.blit(panel, (x0, y0))
 
 # --- Overlay: Game Over / Win/Lose ---
 def draw_game_over_overlay(surf: pygame.Surface, title: str) -> None:
@@ -858,6 +906,7 @@ def main():
             if snake1.is_in_poison: draw_poison_blink(screen)
             draw_shrink_notice(screen)
             draw_hud_one(screen, snake1, total_eaten1, "P1")
+            draw_minimap(screen, [snake1])
             pygame.display.flip()
             continue
 
@@ -944,6 +993,7 @@ def main():
         screen.blit(left, (0, 0))
         screen.blit(right, (view_w, 0))
         pygame.draw.rect(screen, (30, 30, 30), pygame.Rect(view_w - 1, 0, 2, H))
+        draw_minimap(screen, [snake1, snake2])
         pygame.display.flip()
 
     pygame.quit()
