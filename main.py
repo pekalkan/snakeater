@@ -29,6 +29,7 @@ BTN_HOVER   = (90, 210, 120)
 
 BTN_TEXT    = (245, 255, 245)
 SHIELD_COLOR   = (120, 255, 120)  # green shield orb
+SAFE_BG       = (252, 247, 231)  # cream fill for safe zone
 POISON_WARN_BG = (160, 30, 30, 160)
 POISON_WARN_TEXT = (255, 230, 230)
 
@@ -573,6 +574,8 @@ def draw_foods(surf: pygame.Surface, camx: float, camy: float) -> None:
 
 def draw_world_border(surf: pygame.Surface, camx: float, camy: float) -> None:
     cx, cy = world_to_screen(0, 0, camx, camy)
+    # Fill the safe circle with cream color, then draw a subtle outline
+    pygame.draw.circle(surf, SAFE_BG, (cx, cy), int(SAFE_R))
     pygame.draw.circle(surf, (80, 80, 80), (cx, cy), int(SAFE_R), 2)
 
 # --- Poison Zone Blink Warning ---
