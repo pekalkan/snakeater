@@ -34,7 +34,7 @@ POISON_WARN_BG = (160, 30, 30, 160)
 POISON_WARN_TEXT = (255, 230, 230)
 
 # ---------------- Finite World Bounds ----------------
-WORLD_W, WORLD_H = 4800, 2700        # wider safe area (16:9)
+WORLD_W, WORLD_H = 14400, 8100       # 3x larger safe area (keeps 16:9)
 WORLD_LEFT  = -WORLD_W // 2
 WORLD_TOP   = -WORLD_H // 2
 WORLD_RIGHT = WORLD_LEFT + WORLD_W
@@ -284,12 +284,15 @@ def spawn_chunk(cx: int, cy: int) -> None:
     if minx >= maxx or miny >= maxy:
         return  # chunk lies outside world
 
+    boosts_created = 0
     for _ in range(FOOD_PER_CHUNK):
         fx = random.uniform(minx, maxx)
         fy = random.uniform(miny, maxy)
         fr = FOOD_R
         kind = "boost" if random.random() < BOOST_FRACTION else "normal"
+        if kind == "boost": boosts_created += 1
         foods.append({"x": fx, "y": fy, "r": fr, "kind": kind})
+    if boosts_created > 0: spawn_items_in_chunk(cx, cy, boosts_created, "shield")
 
 # ---------------- Spawn Balancer (per chunk) ----------------
 TARGET_PER_CHUNK = FOOD_PER_CHUNK  # desired items per active chunk
@@ -320,13 +323,13 @@ last_density_spawn = 0.0
 
 def periodic_spawn_around(points: list[tuple[float, float]]) -> None:
     """Every SPAWN_INTERVAL seconds, ensure each chunk near `points`
-    reaches TARGET_PER_CHUNK total items and at least MIN_BOOST_PER_CHUNK boosts."""
+    reaches TARGET_PER_CHUNK total items, at least MIN_BOOST_PER_CHUNK boosts,
+    and shields count equals boosts count."""
     global last_density_spawn
     now = time.time()
     if now - last_density_spawn < SPAWN_INTERVAL:
         return
 
-    # Build the set of nearby chunk keys to maintain
     keys: set[tuple[int, int]] = set()
     for (px, py) in points:
         pcx, pcy = chunk_of(px, py)
@@ -340,36 +343,48 @@ def periodic_spawn_around(points: list[tuple[float, float]]) -> None:
         last_density_spawn = now
         return
 
-    # Ensure chunks exist
     for key in keys:
         if key not in spawned_chunks:
             spawn_chunk(*key)
             spawned_chunks.add(key)
 
-    # Count totals and boosts per key
     total_counts: dict[tuple[int, int], int] = {k: 0 for k in keys}
     boost_counts: dict[tuple[int, int], int] = {k: 0 for k in keys}
+    shield_counts: dict[tuple[int, int], int] = {k: 0 for k in keys}
     for f in foods:
         k = chunk_of(f["x"], f["y"])
         if k in total_counts:
             total_counts[k] += 1
-            if f.get("kind") == "boost":
+            kind = f.get("kind")
+            if kind == "boost":
                 boost_counts[k] += 1
+            elif kind == "shield":
+                shield_counts[k] += 1
 
-    # Spawn deficits: guarantee at least MIN_BOOST_PER_CHUNK boosts
     for key in keys:
         total = total_counts[key]
         boosts = boost_counts[key]
+        shields = shield_counts[key]
         desired_total = TARGET_PER_CHUNK
-        # Aim for fraction, but guarantee a minimum of one boost
         desired_boosts = max(MIN_BOOST_PER_CHUNK, int(round(desired_total * BOOST_FRACTION)))
-        missing_total = max(0, desired_total - total)
-        missing_boosts = max(0, desired_boosts - boosts)
 
+        missing_total = max(0, desired_total - total)
+
+        # ensure at least desired_boosts
+        missing_boosts = max(0, desired_boosts - boosts)
         if missing_boosts > 0:
             spawn_items_in_chunk(key[0], key[1], missing_boosts, "boost")
-            missing_total -= missing_boosts
+            boosts += missing_boosts
+            missing_total = max(0, missing_total - missing_boosts)
 
+        # ensure shields == boosts
+        missing_shields = max(0, boosts - shields)
+        if missing_shields > 0:
+            spawn_items_in_chunk(key[0], key[1], missing_shields, "shield")
+            shields += missing_shields
+            missing_total = max(0, missing_total - missing_shields)
+
+        # fill the remainder with normal
         if missing_total > 0:
             spawn_items_in_chunk(key[0], key[1], missing_total, "normal")
 
@@ -406,9 +421,14 @@ def eat_food_if_colliding(snake: Snake) -> int:
     for f in foods:
         if dist(head, (f["x"], f["y"])) <= (head_r + f["r"]):
             eaten += 1
-            snake.grow(FOOD_GROWTH)
-            if f.get("kind") == "boost":
+            kind = f.get("kind")
+            if kind == "boost":
+                snake.grow(FOOD_GROWTH)
                 snake.apply_boost(BOOST_MULT, BOOST_DURATION)
+            elif kind == "shield":
+                snake.shield_charges += 1
+            else:  # normal
+                snake.grow(FOOD_GROWTH)
         else:
             keep.append(f)
     foods = keep
@@ -417,7 +437,7 @@ def eat_food_if_colliding(snake: Snake) -> int:
 def draw_foods(surf: pygame.Surface, camx: float, camy: float) -> None:
     for f in foods:
         sx, sy = world_to_screen(f["x"], f["y"], camx, camy)
-        col = BOOST_COLOR if f.get("kind") == "boost" else FOOD_COLOR
+        col = BOOST_COLOR if f.get("kind") == "boost" else (SHIELD_COLOR if f.get("kind") == "shield" else FOOD_COLOR)
         pygame.draw.circle(surf, col, (sx, sy), f["r"])
 
 def draw_world_border(surf: pygame.Surface, camx: float, camy: float) -> None:
@@ -478,6 +498,10 @@ def steal_if_cross(attacker: Snake, defender: Snake, skip_recent: int = 4) -> fl
     for i in range(skip_recent, last_idx):
         hit, ip = segment_intersection(p0, p1, defender.points[i], defender.points[i + 1])
         if hit:
+            # Defender shield negates the cut once
+            if getattr(defender, "shield_charges", 0) > 0:
+                defender.shield_charges -= 1
+                return 0.0
             stolen = defender.cut_from_index(i, ip)
             attacker.length += stolen
             return stolen
@@ -572,6 +596,7 @@ def main():
             # World management for P1 only
             ensure_chunks_around(snake1.x, snake1.y, radius_chunks=1)
             cull_far_foods(snake1.x, snake1.y, keep_radius_chunks=2)
+            periodic_spawn_around([(snake1.x, snake1.y)])
 
             # Update P1
             snake1.update(dt)
@@ -598,6 +623,7 @@ def main():
         midx = 0.5 * (snake1.x + snake2.x)
         midy = 0.5 * (snake1.y + snake2.y)
         cull_far_foods(midx, midy, keep_radius_chunks=2)
+        periodic_spawn_around([(snake1.x, snake1.y), (snake2.x, snake2.y)])
 
         # Update both
         snake1.update(dt)
