@@ -34,7 +34,7 @@ POISON_WARN_BG = (160, 30, 30, 160)
 POISON_WARN_TEXT = (255, 230, 230)
 
 # ---------------- Finite World Bounds ----------------
-WORLD_W, WORLD_H = 4000, 2400        # larger finite world size
+WORLD_W, WORLD_H = 4800, 2700        # wider safe area (16:9)
 WORLD_LEFT  = -WORLD_W // 2
 WORLD_TOP   = -WORLD_H // 2
 WORLD_RIGHT = WORLD_LEFT + WORLD_W
