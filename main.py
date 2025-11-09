@@ -35,8 +35,10 @@ POISON_WARN_TEXT = (255, 230, 230)
 # ---------------- Finite World Bounds (CIRCULAR) ----------------
 # Keep the original rectangle numbers only to infer an initial radius.
 _RECT_W, _RECT_H = 4320, 2430
-SAFE_R = int(min(_RECT_W, _RECT_H) // 2)   # initial safe radius (inscribed circle)
-SAFE_R_INIT = SAFE_R                       # for restart
+WORLD_DIAMETER_SCALE = 2.25                # +50% more (total 2.25x base diameter)
+BASE_DIAMETER = min(_RECT_W, _RECT_H)
+SAFE_R = int((BASE_DIAMETER * WORLD_DIAMETER_SCALE) / 2)   # scaled initial safe radius
+SAFE_R_INIT = SAFE_R
 OUTSIDE_DECAY_RATE = 180.0                 # length lost per second while outside
 
 # --- Safe zone shrinking ---
