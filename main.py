@@ -291,7 +291,7 @@ FOOD_PER_CHUNK = 3
 FOOD_R = 6
 FOOD_GROWTH = 30.0
 
-BOOST_FRACTION = 0.03   # 3% of foods are boost orbs
+BOOST_FRACTION = 0.05   # 5% of foods are boost orbs
 BOOST_MULT     = 1.5    # move at 1.5x when boosted
 BOOST_DURATION = 5.0    # boost lasts 5 seconds
 PREDATION_RATIO = 1.0    # attacker must be > (ratio × defender.length) to steal
@@ -301,7 +301,7 @@ EAT_ON_HEAD_COLLISION = True   # if True, head contact lets the larger snake eat
 START_LENGTH = 250.0           # respawn starting trail length (matches Snake.__init__)
 
  # --- Shields (green protection) ---
-SHIELD_FRACTION = BOOST_FRACTION * 0.5  # spawn half as often as boosts
+SHIELD_FRACTION = 0.05  # 5% of foods are shields
 SHIELD_DURATION = 5.0             # each pickup grants 5 s protection
 
 # --- Defeat by length ---
@@ -839,8 +839,6 @@ def main():
             cull_far_foods(snake1.x, snake1.y, keep_radius_chunks=2)
             periodic_spawn_around([(snake1.x, snake1.y)])
 
-            maybe_spawn_nearby_shields([(snake1.x, snake1.y)])
-
             # Update P1
             snake1.update(dt)
             total_eaten1 += eat_food_if_colliding(snake1)
@@ -868,8 +866,6 @@ def main():
         midy = 0.5 * (snake1.y + snake2.y)
         cull_far_foods(midx, midy, keep_radius_chunks=2)
         periodic_spawn_around([(snake1.x, snake1.y), (snake2.x, snake2.y)])
-
-        maybe_spawn_nearby_shields([(snake1.x, snake1.y), (snake2.x, snake2.y)])
 
         # Update both
         snake1.update(dt)
