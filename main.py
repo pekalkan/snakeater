@@ -4,8 +4,11 @@ import math
 import random
 import time
 import pygame
+from pathlib import Path
 
 # ---------------- Window / Pygame ----------------
+# ---------------- Window / Pygame ----------------
+pygame.mixer.pre_init(44100, -16, 2, 512)
 pygame.init()
 W, H = 1366, 768
 screen = pygame.display.set_mode((W, H))
@@ -13,6 +16,58 @@ pygame.display.set_caption("snakeater - shields added")
 clock = pygame.time.Clock()
 FONT = pygame.font.SysFont("Menlo", 20)
 TITLE_FONT = pygame.font.SysFont("Menlo", 48)
+
+# ---------------- Audio (Music & SFX) ----------------
+# ---------------- Paths & Audio (Music & SFX) ----------------
+BASE_DIR = Path(__file__).resolve().parent
+ASSET_MUSIC = BASE_DIR / "assets" / "bg_music.ogg"   # OGG stream recommended
+ASSET_POISON_SFX = BASE_DIR / "assets" / "poison.wav"  # short WAV for instant playback
+
+class AudioManager:
+    def __init__(self, music_path: Path, poison_path: Path):
+        self.ok = False
+        self.music_ok = False
+        self.sfx_ok = False
+        self.muted = False
+        self.poison = None
+        try:
+            pygame.mixer.init()
+            self.ok = True
+            # Music (single streaming channel)
+            try:
+                pygame.mixer.music.load(str(music_path))
+                pygame.mixer.music.set_volume(0.45)
+                pygame.mixer.music.play(-1)  # loop forever
+                self.music_ok = True
+            except Exception as e:
+                print("Music load/play failed:", e)
+            # SFX (short effects)
+            try:
+                self.poison = pygame.mixer.Sound(str(poison_path))
+                self.poison.set_volume(0.8)
+                self.sfx_ok = True
+            except Exception as e:
+                self.poison = None
+                print("Poison SFX load failed:", e)
+        except Exception as e:
+            print("Audio init failed:", e)
+
+    def play_poison(self):
+        if self.sfx_ok and self.poison and not self.muted:
+            try:
+                self.poison.play()
+            except Exception:
+                pass
+
+    def toggle_mute(self):
+        self.muted = not self.muted
+        vol = 0.0 if self.muted else 0.45
+        try:
+            pygame.mixer.music.set_volume(vol)
+        except Exception:
+            pass
+
+audio = AudioManager(ASSET_MUSIC, ASSET_POISON_SFX)
 
 # ---------------- Colors ----------------
 BG_COLOR   = (18, 22, 28)
@@ -120,6 +175,7 @@ class Snake:
         self.shield_charges = 0
         self.is_in_poison = False
         self.shield_until = 0.0          # NEW: timed shield
+        self.just_entered_poison = False
 
     # ---- movement & trail helpers ----
     def handle_input(self, dt: float) -> None:
@@ -263,10 +319,12 @@ class Snake:
         self._trim_trail_to_length()
         self._self_cut_if_crossed()
 
-        # Poison zone handling (outside the world border)
+        # Poison zone handling (outside the world border) + edge-trigger flag
+        prev_in_poison = self.is_in_poison
         inside = (WORLD_LEFT + self.thickness <= self.x <= WORLD_RIGHT - self.thickness and
                   WORLD_TOP  + self.thickness <= self.y <= WORLD_BOTTOM - self.thickness)
         self.is_in_poison = not inside
+        self.just_entered_poison = (not prev_in_poison) and self.is_in_poison
         if self.is_in_poison and not self.is_shield_active():
             old_len = self.length
             self.length = max(0.0, self.length - OUTSIDE_DECAY_RATE * dt)
@@ -654,7 +712,7 @@ def eat_and_maybe_eliminate(attacker: Snake, defender: Snake) -> str:
     """
     Perform head-collision eat if conditions allow. If defender's length is at or below
     (HEADS_TO_LOSE × head_diameter), the defender loses the round.
-    Returns: "none" (no eat), "ate" (ate + defender respawned), or "attacker_win" (defender eliminated).
+    Returns: "none" (no eat) or "attacker_win" (defender eliminated; no respawn).
     """
     if not EAT_ON_HEAD_COLLISION:
         return "none"
@@ -669,15 +727,12 @@ def eat_and_maybe_eliminate(attacker: Snake, defender: Snake) -> str:
         return "none"
 
     # Elimination check: if defender is already very short, it loses instead of respawning
-    head_diameter = defender.thickness * 2.0
-    if defender.length <= HEADS_TO_LOSE * head_diameter:
+    if defender.length <= LOSE_LENGTH:
         return "attacker_win"
 
-    # Normal full-eat: transfer defender's remaining length, then respawn defender
+    # No respawn on eat: end round immediately with attacker as winner
     attacker.length += defender.length
-    sx, sy = random_spawn_inside_world()
-    defender.respawn(sx, sy)
-    return "ate"
+    return "attacker_win"
 
 # ---------------- HUD ----------------
 def draw_hud_one(surf: pygame.Surface, s: Snake, eaten: int, label: str = "") -> None:
@@ -762,6 +817,9 @@ def main():
                 running = False
             elif e.type == pygame.KEYDOWN and e.key == pygame.K_ESCAPE:
                 running = False
+            elif e.type == pygame.KEYDOWN and e.key == pygame.K_m:
+                # Toggle music mute/unmute
+                audio.toggle_mute()
             elif e.type == pygame.KEYDOWN and e.key == pygame.K_r:
                 # Restart the round at any time. Keep current game_mode if set.
                 foods = []
@@ -816,6 +874,8 @@ def main():
 
             # Update P1
             snake1.update(dt)
+            if getattr(snake1, "just_entered_poison", False):
+                audio.play_poison()
             total_eaten1 += eat_food_if_colliding(snake1)
 
             # Camera follows P1 (full-screen)
@@ -846,6 +906,10 @@ def main():
             # Update both
             snake1.update(dt)
             snake2.update(dt)
+            if getattr(snake1, "just_entered_poison", False):
+                audio.play_poison()
+            if getattr(snake2, "just_entered_poison", False):
+                audio.play_poison()
             total_eaten1 += eat_food_if_colliding(snake1)
             total_eaten2 += eat_food_if_colliding(snake2)
 
