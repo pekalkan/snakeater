@@ -304,8 +304,6 @@ START_LENGTH = 250.0           # respawn starting trail length (matches Snake.__
 # --- Shields (green protection) ---
 SHIELD_FRACTION = BOOST_FRACTION  # spawn as often as boosts
 SHIELD_DURATION = 5.0             # each pickup grants 5 s protection
-# --- Round end rule ---
-HEAD_ON_ENDS_GAME = True   # when heads collide, end the round with a winner
 
 spawned_chunks = set()  # {(cx, cy)}
 foods = []              # list of dicts: {"x","y","r","kind"}
@@ -552,23 +550,6 @@ def draw_shrink_notice(surf: pygame.Surface) -> None:
     surf.blit(shadow, (x + 2, y + 2))
     surf.blit(txt, (x, y))
 
-def draw_game_over_overlay(surf: pygame.Surface, title: str, subtitle: str = "Press R to restart, ESC to quit") -> None:
-    """Centered game-over banner."""
-    # Title
-    t = TITLE_FONT.render(title, True, (255, 230, 230))
-    ts = TITLE_FONT.render(title, True, (40, 0, 0))
-    x = (surf.get_width() - t.get_width()) // 2
-    y = surf.get_height() // 2 - t.get_height()
-    surf.blit(ts, (x + 2, y + 2))
-    surf.blit(t,  (x, y))
-    # Subtitle
-    st = FONT.render(subtitle, True, (235, 235, 235))
-    ss = FONT.render(subtitle, True, (20, 20, 20))
-    sx = (surf.get_width() - st.get_width()) // 2
-    sy = y + t.get_height() + 12
-    surf.blit(ss, (sx + 1, sy + 1))
-    surf.blit(st, (sx, sy))
-
 def draw_start_menu(surf: pygame.Surface, btn1_rect: pygame.Rect, btn2_rect: pygame.Rect) -> None:
     surf.fill(BG_COLOR)
     # Title and hint
@@ -653,25 +634,6 @@ def eat_if_head_collides(attacker: Snake, defender: Snake) -> bool:
     defender.respawn(sx, sy)
     return True
 
-# --- Head-on winner resolver ---
-def resolve_head_on_winner(s1: Snake, s2: Snake):
-    """Return 'P1', 'P2', 'DRAW' if heads are touching; otherwise None."""
-    threshold = s1.thickness + s2.thickness
-    if dist((s1.x, s1.y), (s2.x, s2.y)) > threshold:
-        return None
-    # Shield precedence
-    s1_sh, s2_sh = s1.is_shield_active(), s2.is_shield_active()
-    if s1_sh and not s2_sh:
-        return "P1"
-    if s2_sh and not s1_sh:
-        return "P2"
-    # Larger length wins; equal is draw
-    if s1.length > s2.length:
-        return "P1"
-    if s2.length > s1.length:
-        return "P2"
-    return "DRAW"
-
 # ---------------- HUD ----------------
 def draw_hud_one(surf: pygame.Surface, s: Snake, eaten: int, label: str = "") -> None:
     sh_left = max(0, int(s.shield_until - time.time()))
@@ -725,10 +687,10 @@ def main():
     running = True
     game_state = "menu"
     game_mode = None  # "1p" or "2p"
-    game_over_winner = None  # "P1", "P2", or "DRAW"
 
     # Safe zone shrink scheduling
     next_shrink_time = time.time() + SHRINK_INTERVAL
+    global shrink_notice_until
 
     # Two buttons centered with a small gap
     btn_w, btn_h, gap = 260, 64, 40
@@ -752,29 +714,28 @@ def main():
                 running = False
             elif e.type == pygame.KEYDOWN and e.key == pygame.K_ESCAPE:
                 running = False
-
-            if game_state == "over" and e.type == pygame.KEYDOWN:
-                if e.key == pygame.K_r:
-                    # Reset globals and return to menu
-                    foods = []
-                    spawned_chunks.clear()
-                    total_eaten1 = 0
-                    total_eaten2 = 0
-                    # Reset world to initial size
-                    WORLD_W, WORLD_H = WORLD_W_INIT, WORLD_H_INIT
-                    WORLD_LEFT  = -WORLD_W // 2
-                    WORLD_TOP   = -WORLD_H // 2
-                    WORLD_RIGHT = WORLD_LEFT + WORLD_W
-                    WORLD_BOTTOM= WORLD_TOP + WORLD_H
-                    # Recreate snakes
-                    snake1 = Snake(-120.0, 0.0, controls_p1, SNAKE_BODY, SNAKE_HEAD)
-                    snake2 = Snake( 120.0, 0.0, controls_p2, SNAKE2_BODY, SNAKE2_HEAD)
-                    # Timers
-                    next_shrink_time = time.time() + SHRINK_INTERVAL
-                    shrink_notice_until = 0.0
-                    # Back to menu
-                    game_over_winner = None
-                    game_mode = None
+            elif e.type == pygame.KEYDOWN and e.key == pygame.K_r:
+                # Restart the round at any time. Keep current game_mode if set.
+                foods = []
+                spawned_chunks.clear()
+                total_eaten1 = 0
+                total_eaten2 = 0
+                # Reset world to initial size
+                WORLD_W, WORLD_H = WORLD_W_INIT, WORLD_H_INIT
+                WORLD_LEFT  = -WORLD_W // 2
+                WORLD_TOP   = -WORLD_H // 2
+                WORLD_RIGHT = WORLD_LEFT + WORLD_W
+                WORLD_BOTTOM= WORLD_TOP + WORLD_H
+                # Recreate snakes
+                snake1 = Snake(-120.0, 0.0, controls_p1, SNAKE_BODY, SNAKE_HEAD)
+                snake2 = Snake( 120.0, 0.0, controls_p2, SNAKE2_BODY, SNAKE2_HEAD)
+                # Reset shrink timers & notices
+                next_shrink_time = time.time() + SHRINK_INTERVAL
+                shrink_notice_until = 0.0
+                # If a mode is selected, jump straight into game; otherwise stay at menu
+                if game_mode in ("1p", "2p"):
+                    game_state = "game"
+                else:
                     game_state = "menu"
 
             if game_state == "menu":
@@ -832,25 +793,16 @@ def main():
         # Update both
         snake1.update(dt)
         snake2.update(dt)
+        total_eaten1 += eat_food_if_colliding(snake1)
+        total_eaten2 += eat_food_if_colliding(snake2)
 
-        # Sudden-death: end the round if heads collide
-        if HEAD_ON_ENDS_GAME:
-            _winner = resolve_head_on_winner(snake1, snake2)
-            if _winner is not None:
-                game_over_winner = _winner
-                game_state = "over"
+        # Head-on predation (full eat) – shield blocks being eaten
+        if not eat_if_head_collides(snake1, snake2):
+            _ = eat_if_head_collides(snake2, snake1)
 
-        if game_state != "over":
-            total_eaten1 += eat_food_if_colliding(snake1)
-            total_eaten2 += eat_food_if_colliding(snake2)
-
-            # Head-on predation (full eat) – shield blocks being eaten
-            if not eat_if_head_collides(snake1, snake2):
-                _ = eat_if_head_collides(snake2, snake1)
-
-            # Steal mechanic both ways – shield blocks being cut
-            _ = steal_if_cross(snake1, snake2)
-            _ = steal_if_cross(snake2, snake1)
+        # Steal mechanic both ways – shield blocks being cut
+        _ = steal_if_cross(snake1, snake2)
+        _ = steal_if_cross(snake2, snake1)
 
         # Cameras per player
         view_w = W // 2
@@ -872,9 +824,6 @@ def main():
         if snake1.is_in_poison: draw_poison_blink(left)
         draw_shrink_notice(left)
         draw_hud_one(left, snake1, total_eaten1, "P1")
-        if game_state == "over":
-            title = "DRAW!" if game_over_winner == "DRAW" else (f"{game_over_winner} WINS!")
-            draw_game_over_overlay(left, title)
 
         # Right view (P2)
         right.fill(BG_COLOR)
@@ -885,9 +834,6 @@ def main():
         if snake2.is_in_poison: draw_poison_blink(right)
         draw_shrink_notice(right)
         draw_hud_one(right, snake2, total_eaten2, "P2")
-        if game_state == "over":
-            title = "DRAW!" if game_over_winner == "DRAW" else (f"{game_over_winner} WINS!")
-            draw_game_over_overlay(right, title)
 
         # Compose to screen
         screen.blit(left, (0, 0))
