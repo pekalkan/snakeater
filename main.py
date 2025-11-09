@@ -301,8 +301,8 @@ CHUNK_SIZE = 800
 FOOD_PER_CHUNK = 3
 FOOD_R = 6
 FOOD_GROWTH = 30.0
-# Speed decay: each eaten food slows the snake by 10% (TEST)
-SPEED_DECAY_PER_FOOD = 0.10
+# Speed decay: each eaten food slows the snake by 1%
+SPEED_DECAY_PER_FOOD = 0.01
 SPEED_DECAY_PER_LENGTH = SPEED_DECAY_PER_FOOD / FOOD_GROWTH  # per pixel of length gained
 MIN_SIZE_SPEED_FACTOR = 0.5  # minimum cap: 50% of intended speed
 BOOST_FRACTION = 0.05   # 5% of foods are boost orbs
