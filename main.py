@@ -45,7 +45,7 @@ SHRINK_INTERVAL = 60.0      # seconds between shrinks
 SHRINK_FACTOR = 0.8         # each shrink scales world size by 80%
 SHRINK_NOTICE_SECS = 3.0    # on-screen warning duration
 MIN_WORLD_W, MIN_WORLD_H = 1600, 900  # do not shrink below this (keeps area playable)
-SHRINK_MESSAGE = "SAFE ZONE IS SHRINKING! Move inward!"
+SHRINK_MESSAGE = "SHRINKING"
 # runtime state for notices
 shrink_notice_until = 0.0
 
