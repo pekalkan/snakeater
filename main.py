@@ -287,7 +287,7 @@ class Snake:
 
 # ---------------- Infinite World (chunks) ----------------
 CHUNK_SIZE = 800
-FOOD_PER_CHUNK = 12
+FOOD_PER_CHUNK = 3
 FOOD_R = 6
 FOOD_GROWTH = 30.0
 
@@ -373,8 +373,8 @@ def spawn_chunk(cx: int, cy: int) -> None:
 
 # ---------------- Spawn Balancer (per chunk) ----------------
 TARGET_PER_CHUNK = FOOD_PER_CHUNK  # desired items per active chunk
-MIN_BOOST_PER_CHUNK = 1            # guarantee at least one boost per active chunk
-MIN_SHIELD_PER_CHUNK = 1           # guarantee at least one shield per active chunk
+MIN_BOOST_PER_CHUNK = 0            # guarantee at least one boost per active chunk
+MIN_SHIELD_PER_CHUNK = 0           # guarantee at least one shield per active chunk
 
 def spawn_items_in_chunk(cx: int, cy: int, n: int, kind: str) -> None:
     if n <= 0:
