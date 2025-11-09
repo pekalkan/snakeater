@@ -29,7 +29,7 @@ BTN_HOVER   = (90, 210, 120)
 
 BTN_TEXT    = (245, 255, 245)
 SHIELD_COLOR   = (120, 255, 120)  # green shield orb
-SAFE_BG       = (252, 247, 231)  # cream fill for safe zone
+SAFE_BG       = (220, 220, 220)  # light gray fill for safe zone
 POISON_WARN_BG = (160, 30, 30, 160)
 POISON_WARN_TEXT = (255, 230, 230)
 
