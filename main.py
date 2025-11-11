@@ -1,9 +1,10 @@
-"""snakeater – continuous tube snake, finite shrinking CIRCLE, food + boost + shield (no audio)"""
+"""snakeater – continuous tube snake, finite shrinking CIRCLE, food + boost + shield (no audio yet)"""
 
 import math
 import random
 import time
 import pygame
+from typing import Optional
 
 # ---------------- Window / Pygame ----------------
 pygame.init()
@@ -66,6 +67,82 @@ def world_to_screen(px, py, camx, camy):
 
 def clamp(v, lo, hi):
     return lo if v < lo else hi if v > hi else v
+
+# ---------------- AI Helpers ----------------
+def _nearest_food(px: float, py: float, prefer=("shield", "boost", "normal")):
+    best = None
+    best_d2 = 1e18
+    # first pass: iterate by preference
+    for pref in prefer:
+        for f in foods:
+            if f.get("kind") != pref:
+                continue
+            dx = f["x"] - px
+            dy = f["y"] - py
+            d2 = dx*dx + dy*dy
+            if d2 < best_d2:
+                best_d2 = d2
+                best = f
+        if best is not None:
+            break
+    return best
+
+def ai_update_snake(s: 'Snake', dt: float, other: Optional['Snake'] = None) -> None:
+    """Very simple steering AI: seek shield > boost > normal; avoid poison; avoid bigger enemy head-on.
+    Replicates movement physics similar to handle_input(), without reading keyboard."""
+    # Choose a target: if outside safe zone, head towards center
+    if (math.hypot(s.x, s.y) + s.thickness) > SAFE_R - 20:
+        tx, ty = 0.0, 0.0
+    else:
+        # prioritize shields if not active, then boosts, then normal food
+        prefer = ("shield", "boost", "normal") if not s.is_shield_active() else ("boost", "normal")
+        target = _nearest_food(s.x, s.y, prefer=prefer)
+        if target is not None:
+            tx, ty = target["x"], target["y"]
+        else:
+            tx, ty = 0.0, 0.0  # fallback to center
+
+    # Simple flee if much smaller and enemy is very close
+    if other is not None and other.length > 1.2 * s.length:
+        dx = other.x - s.x
+        dy = other.y - s.y
+        if dx*dx + dy*dy < (600.0 * 600.0):  # within 600 px -> flee opposite
+            tx, ty = s.x - dx, s.y - dy
+
+    # Desired heading towards (tx, ty)
+    hx = tx - s.x
+    hy = ty - s.y
+    mag = math.hypot(hx, hy)
+    if mag > 1e-6:
+        s.heading_x, s.heading_y = hx / mag, hy / mag
+
+    # Intended speed: behave as if keys are pressed (2x)
+    intended = s.base_speed * 2.0
+    # Size penalty same as player
+    size_penalty = 1.0 - max(0.0, (s.length - START_LENGTH)) * SPEED_DECAY_PER_LENGTH
+    if size_penalty < MIN_SIZE_SPEED_FACTOR:
+        size_penalty = MIN_SIZE_SPEED_FACTOR
+    s.speed_current = intended * size_penalty * s.boost_mul
+
+    # Advance position
+    s.vx = s.heading_x * s.speed_current
+    s.vy = s.heading_y * s.speed_current
+    s.x += s.vx * dt
+    s.y += s.vy * dt
+
+    # Trail maintenance similar to update()
+    s._push_head_samples((s.x, s.y))
+    s._trim_trail_to_length()
+    s._self_cut_if_crossed()
+
+    # Poison handling
+    inside = (math.hypot(s.x, s.y) + s.thickness) <= SAFE_R
+    s.is_in_poison = not inside
+    if s.is_in_poison and not s.is_shield_active():
+        old_len = s.length
+        s.length = max(0.0, s.length - OUTSIDE_DECAY_RATE * dt)
+        if s.length < old_len:
+            s._trim_trail_to_length()
 
 def segment_intersection(p0, p1, p2, p3, eps: float = 1e-9):
     """
@@ -668,18 +745,16 @@ def draw_game_over_overlay(surf: pygame.Surface, title: str) -> None:
     surf.blit(ts, (x + 2, y + 2))
     surf.blit(t,  (x, y))
 
-def draw_start_menu(surf: pygame.Surface, btn1_rect: pygame.Rect, btn2_rect: pygame.Rect) -> None:
+def draw_start_menu(surf: pygame.Surface, btn1_rect: pygame.Rect, btn2_rect: pygame.Rect, btn3_rect: pygame.Rect) -> None:
     surf.fill(BG_COLOR)
     # Title and hint
     title = TITLE_FONT.render("SNAKEATER", True, HUD_TEXT)
-    hint  = FONT.render("Select 1 or 2 Players (press 1/2)", True, HUD_TEXT)
+    hint  = FONT.render("Select mode (press 1/2/3)", True, HUD_TEXT)
     surf.blit(title, ((W - title.get_width()) // 2, int(H * 0.32)))
     surf.blit(hint,  ((W - hint.get_width())  // 2, int(H * 0.32) + title.get_height() + 12))
 
-    # Buttons (hover effect)
     mx, my = pygame.mouse.get_pos()
-
-    for rect, label in ((btn1_rect, "1 PLAYER"), (btn2_rect, "2 PLAYERS")):
+    for rect, label in ((btn1_rect, "1 PLAYER"), (btn3_rect, "1P VS CPU"), (btn2_rect, "2 PLAYERS")):
         hover = rect.collidepoint((mx, my))
         color = BTN_HOVER if hover else BTN_NORMAL
         pygame.draw.rect(surf, color, rect, border_radius=12)
@@ -821,18 +896,19 @@ def main():
     global total_eaten1, total_eaten2, SAFE_R, shrink_notice_until, snake1, snake2
     running = True
     game_state = "menu"
-    game_mode = None  # "1p" or "2p"
+    game_mode = None  # "1p", "2p" or "pve"
     game_over = False
     loser = None
 
     # Safe zone shrink scheduling
     next_shrink_time = time.time() + SHRINK_INTERVAL
 
-    # Two buttons centered with a small gap
+    # Two buttons centered with a small gap, plus PvE button
     btn_w, btn_h, gap = 260, 64, 40
     left_x = (W - (btn_w * 2 + gap)) // 2
     btn1_rect = pygame.Rect(left_x, int(H * 0.55), btn_w, btn_h)
     btn2_rect = pygame.Rect(left_x + btn_w + gap, int(H * 0.55), btn_w, btn_h)
+    btn3_rect = pygame.Rect(left_x + (btn_w + gap) // 2, int(H * 0.55) + btn_h + 18, btn_w, btn_h)
 
     while running:
         dt = clock.tick(60) / 1000.0
@@ -867,7 +943,7 @@ def main():
                 game_over = False
                 loser = None
                 # preserve current mode (stay in game if selected)
-                if game_mode in ("1p", "2p"):
+                if game_mode in ("1p", "2p", "pve"):
                     game_state = "game"
                 else:
                     game_state = "menu"
@@ -879,14 +955,18 @@ def main():
                         game_mode = "1p"; game_state = "game"
                     elif e.key == pygame.K_2:
                         game_mode = "2p"; game_state = "game"
+                    elif e.key == pygame.K_3:
+                        game_mode = "pve"; game_state = "game"
                 elif e.type == pygame.MOUSEBUTTONDOWN and e.button == 1:
                     if btn1_rect.collidepoint(e.pos):
                         game_mode = "1p"; game_state = "game"
                     elif btn2_rect.collidepoint(e.pos):
                         game_mode = "2p"; game_state = "game"
+                    elif btn3_rect.collidepoint(e.pos):
+                        game_mode = "pve"; game_state = "game"
 
         if game_state == "menu":
-            draw_start_menu(screen, btn1_rect, btn2_rect)
+            draw_start_menu(screen, btn1_rect, btn2_rect, btn3_rect)
             pygame.display.flip()
             continue
 
@@ -913,7 +993,71 @@ def main():
             if snake1.is_in_poison: draw_poison_blink(screen)
             draw_shrink_notice(screen)
             draw_hud_one(screen, snake1, total_eaten1, "P1")
+            draw_mode_badge(screen, "MODE: 1P")
             draw_minimap(screen, [snake1])
+            pygame.display.flip()
+            continue
+
+        # --- PvE: 1P vs CPU ---
+        if game_mode == "pve":
+            # spawn/cull around both, but camera follows P1
+            ensure_chunks_around(snake1.x, snake1.y, radius_chunks=1)
+            ensure_chunks_around(snake2.x, snake2.y, radius_chunks=1)
+            midx = 0.5 * (snake1.x + snake2.x)
+            midy = 0.5 * (snake1.y + snake2.y)
+            cull_far_foods(midx, midy, keep_radius_chunks=2)
+            periodic_spawn_around([(snake1.x, snake1.y), (snake2.x, snake2.y)])
+
+            # updates: player + AI
+            snake1.update(dt)
+            # expire AI boost naturally
+            if snake2.boost_mul != 1.0 and time.time() >= snake2.boost_until:
+                snake2.boost_mul = 1.0
+            ai_update_snake(snake2, dt, other=snake1)
+
+            total_eaten1 += eat_food_if_colliding(snake1)
+            total_eaten2 += eat_food_if_colliding(snake2)
+
+            # predation both ways
+            if not game_over:
+                res = eat_and_maybe_eliminate(snake1, snake2)
+                if res == "attacker_win":
+                    game_over = True; loser = "CPU"
+                else:
+                    res2 = eat_and_maybe_eliminate(snake2, snake1)
+                    if res2 == "attacker_win":
+                        game_over = True; loser = "P1"
+
+            # steal mechanic
+            _ = steal_if_cross(snake1, snake2)
+            _ = steal_if_cross(snake2, snake1)
+
+            # length defeat
+            if not game_over:
+                if snake1.length <= LOSE_LENGTH:
+                    game_over = True; loser = "P1"
+                elif snake2.length <= LOSE_LENGTH:
+                    game_over = True; loser = "CPU"
+
+            # camera follow P1
+            camx = snake1.x - W / 2
+            camy = snake1.y - H / 2
+
+            # draw
+            screen.fill(BG_COLOR)
+            draw_world_border(screen, camx, camy)
+            draw_foods(screen, camx, camy)
+            snake1.draw(screen, camx, camy)
+            snake2.draw(screen, camx, camy)
+            if snake1.is_in_poison or snake2.is_in_poison:
+                draw_poison_blink(screen)
+            draw_shrink_notice(screen)
+            draw_hud_two(screen, snake1, total_eaten1, snake2, total_eaten2)
+            draw_mode_badge(screen, "MODE: PvE")
+            draw_minimap(screen, [snake1, snake2])
+            if game_over and loser:
+                title_left = "YOU WIN" if loser == "CPU" else "YOU LOSE"
+                draw_game_over_overlay(screen, title_left)
             pygame.display.flip()
             continue
 
@@ -977,6 +1121,7 @@ def main():
         if snake1.is_in_poison: draw_poison_blink(left)
         draw_shrink_notice(left)
         draw_hud_one(left, snake1, total_eaten1, "P1")
+        draw_mode_badge(left, "MODE: 2P")
         draw_minimap(left, [snake1])
 
         # Right view (P2)
@@ -988,6 +1133,7 @@ def main():
         if snake2.is_in_poison: draw_poison_blink(right)
         draw_shrink_notice(right)
         draw_hud_one(right, snake2, total_eaten2, "P2")
+        draw_mode_badge(right, "MODE: 2P")
         draw_minimap(right, [snake2])
 
         # Draw overlay for win/lose
@@ -1005,6 +1151,19 @@ def main():
         pygame.display.flip()
 
     pygame.quit()
+
+#
+# ---------------- Mode Badge ----------------
+def draw_mode_badge(surf: pygame.Surface, text: str) -> None:
+    badge = FONT.render(text, True, HUD_TEXT)
+    pad = 8
+    w = badge.get_width() + 2 * pad
+    h = badge.get_height() + 2 * pad
+    box = pygame.Surface((w, h), pygame.SRCALPHA)
+    pygame.draw.rect(box, HUD_BG, box.get_rect(), border_radius=8)
+    box.blit(badge, (pad, pad))
+    # place slightly under the main HUD blocks
+    surf.blit(box, (12, 50))
 
 if __name__ == "__main__":
     main()
