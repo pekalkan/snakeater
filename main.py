@@ -301,7 +301,9 @@ class Snake:
 CHUNK_SIZE = 800
 FOOD_PER_CHUNK = 3
 FOOD_R = 6
-FOOD_GROWTH = 30.0
+FOOD_R_MIN = 4
+FOOD_R_MAX = 10
+FOOD_GROWTH = 30.0  # base growth used for speed-decay normalization and default scaling
 # Speed decay: each eaten food slows the snake by 1%
 SPEED_DECAY_PER_FOOD = 0.01
 SPEED_DECAY_PER_LENGTH = SPEED_DECAY_PER_FOOD / FOOD_GROWTH  # per pixel of length gained
@@ -361,6 +363,21 @@ def random_spawn_inside_world(margin: int = 120):
     theta = random.uniform(0.0, 2.0 * math.pi)
     return r * math.cos(theta), r * math.sin(theta)
 
+# --- Helper: create food dict with randomized radius and growth ---
+def _make_food(x: float, y: float, kind: str) -> dict:
+    """Create a food dict with randomized visual radius and growth contribution.
+    - radius: uniform in [FOOD_R_MIN, FOOD_R_MAX]
+    - growth: proportional to radius for non-shield items; shields give no growth
+    """
+    r = random.uniform(FOOD_R_MIN, FOOD_R_MAX)
+    r_i = int(round(r))
+    if kind == "shield":
+        growth = 0.0
+    else:
+        # scale growth with radius relative to baseline FOOD_R
+        growth = FOOD_GROWTH * (r / float(FOOD_R))
+    return {"x": x, "y": y, "r": r_i, "kind": kind, "growth": growth}
+
 def shrink_world_centered(factor: float) -> None:
     global SAFE_R
     new_r = max(MIN_WORLD_R, int(SAFE_R * factor))
@@ -393,7 +410,7 @@ def spawn_chunk(cx: int, cy: int) -> None:
                     kind = "shield"
                 else:
                     kind = "normal"
-                foods.append({"x": fx, "y": fy, "r": FOOD_R, "kind": kind})
+                foods.append(_make_food(fx, fy, kind))
                 placed = True
                 break
         if not placed:
@@ -422,7 +439,7 @@ def spawn_items_in_chunk(cx: int, cy: int, n: int, kind: str) -> None:
             fx = random.uniform(minx, maxx)
             fy = random.uniform(miny, maxy)
             if math.hypot(fx, fy) <= SAFE_R - 10:
-                foods.append({"x": fx, "y": fy, "r": FOOD_R, "kind": kind})
+                foods.append(_make_food(fx, fy, kind))
                 break
 
 
@@ -458,7 +475,7 @@ def _spawn_shield_near(px: float, py: float) -> bool:
         fx = px + math.cos(ang) * d
         fy = py + math.sin(ang) * d
         if math.hypot(fx, fy) <= SAFE_R - 10.0:
-            foods.append({"x": fx, "y": fy, "r": FOOD_R, "kind": "shield"})
+            foods.append(_make_food(fx, fy, "shield"))
             return True
     return False
 
@@ -620,7 +637,9 @@ def eat_food_if_colliding(snake: Snake) -> int:
             if kind == "shield":
                 snake.apply_shield(SHIELD_DURATION)
             else:
-                snake.grow(FOOD_GROWTH)
+                # growth scaled per food
+                growth = f.get("growth", FOOD_GROWTH)
+                snake.grow(growth)
                 if kind == "boost":
                     snake.apply_boost(BOOST_MULT, BOOST_DURATION)
         else:
