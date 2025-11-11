@@ -320,12 +320,6 @@ START_LENGTH = 250.0           # respawn starting trail length (matches Snake.__
 SHIELD_FRACTION = 0.05  # 5% of foods are shields
 SHIELD_DURATION = 5.0             # each pickup grants 5 s protection
 
-# --- Gravitational pull between snakes (longer pulls stronger) ---
-GRAVITY_ENABLED = True
-GRAVITY_STRENGTH = 18000.0      # tune: px^3 / (len * s^2); higher = stronger pull
-GRAVITY_MAX_SPEED = 80.0        # px/sec cap for pull-induced drift per snake
-GRAVITY_MIN_DIST = 60.0         # avoid singularity at very close range
-GRAVITY_SHIELD_REDUCTION = 0.5  # shield halves the pull felt by that snake
 
 # --- Defeat by length ---
 LOSE_LENGTH = 60.0  # if a snake length <= 60, it loses
@@ -557,49 +551,6 @@ def cull_far_foods(px: float, py: float, keep_radius_chunks: int = 2) -> None:
             keep.append(f)
     foods = keep
 
-# --- Gravity between snakes ---
-def apply_gravity_pair(a: Snake, b: Snake, dt: float) -> None:
-    """Apply mutual attraction: each snake is pulled toward the other with
-    magnitude proportional to the other one's length and inverse-square of distance.
-    Longer snakes exert stronger pull. Pull is capped so it doesn't overwhelm controls."""
-    if not GRAVITY_ENABLED:
-        return
-    # Vector from a to b
-    dx = b.x - a.x
-    dy = b.y - a.y
-    d2 = dx*dx + dy*dy
-    d = math.sqrt(max(d2, 1e-6))
-    if d < GRAVITY_MIN_DIST:
-        return
-    ux, uy = dx / d, dy / d
-
-    # Pull speeds (px/sec) toward each other
-    pull_a = (GRAVITY_STRENGTH * b.length) / d2
-    pull_b = (GRAVITY_STRENGTH * a.length) / d2
-
-    # Shield reduces pull felt
-    if a.is_shield_active():
-        pull_a *= GRAVITY_SHIELD_REDUCTION
-    if b.is_shield_active():
-        pull_b *= GRAVITY_SHIELD_REDUCTION
-
-    # Cap pull speeds
-    pull_a = clamp(pull_a, -GRAVITY_MAX_SPEED, GRAVITY_MAX_SPEED)
-    pull_b = clamp(pull_b, -GRAVITY_MAX_SPEED, GRAVITY_MAX_SPEED)
-
-    # Apply drift to positions
-    a.x += ux * pull_a * dt
-    a.y += uy * pull_a * dt
-    b.x -= ux * pull_b * dt
-    b.y -= uy * pull_b * dt
-
-    # Update trails for the additional movement
-    a._push_head_samples((a.x, a.y))
-    a._trim_trail_to_length()
-    a._self_cut_if_crossed()
-    b._push_head_samples((b.x, b.y))
-    b._trim_trail_to_length()
-    b._self_cut_if_crossed()
 
 def eat_food_if_colliding(snake: Snake) -> int:
     """Consume food that collides with the snake head. Returns number eaten."""
@@ -987,8 +938,6 @@ def main():
         total_eaten1 += eat_food_if_colliding(snake1)
         total_eaten2 += eat_food_if_colliding(snake2)
 
-        # Mutual gravitational pull (longer snake pulls stronger)
-        apply_gravity_pair(snake1, snake2, dt)
 
         # Head-on predation (elimination logic)
         if not game_over:
