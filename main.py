@@ -649,6 +649,13 @@ def draw_minimap(surf: pygame.Surface, snakes: list[Snake]) -> None:
         color = s.head_color  # use each snake's head color
         pygame.draw.circle(panel, color, (px, py), 4)
 
+    # Optional: show the primary snake's current speed inside the minimap
+    if snakes:
+        spd = int(snakes[0].speed_current)
+        spd_txt = FONT.render(f"SPD {spd}", True, HUD_TEXT)
+        # place near bottom-left inside the panel with a small padding
+        panel.blit(spd_txt, (8, panel_h - spd_txt.get_height() - 6))
+
     # Blit panel to screen
     surf.blit(panel, (x0, y0))
 
@@ -970,7 +977,7 @@ def main():
         if snake1.is_in_poison: draw_poison_blink(left)
         draw_shrink_notice(left)
         draw_hud_one(left, snake1, total_eaten1, "P1")
-        draw_minimap(left, [snake1, snake2])
+        draw_minimap(left, [snake1])
 
         # Right view (P2)
         right.fill(BG_COLOR)
@@ -981,7 +988,7 @@ def main():
         if snake2.is_in_poison: draw_poison_blink(right)
         draw_shrink_notice(right)
         draw_hud_one(right, snake2, total_eaten2, "P2")
-        draw_minimap(right, [snake1, snake2])
+        draw_minimap(right, [snake2])
 
         # Draw overlay for win/lose
         if game_over and loser == "P1":
