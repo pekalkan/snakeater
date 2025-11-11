@@ -317,8 +317,19 @@ START_LENGTH = 250.0           # respawn starting trail length (matches Snake.__
 
  # --- Shields (green protection) ---
 
+
 SHIELD_FRACTION = 0.05  # 5% of foods are shields
 SHIELD_DURATION = 5.0             # each pickup grants 5 s protection
+
+# --- Net (circular trap) mechanic ---
+NET_DURATION = 2.0            # seconds the net persists
+NET_RADIUS_PER_LEN = 0.45     # radius = this * caster.length
+NET_RADIUS_MIN = 120.0        # clamp minimum radius
+NET_RADIUS_MAX = 420.0        # clamp maximum radius
+NET_DECAY_RATE = 360.0        # length lost per second inside enemy net (faster than poison)
+NET_IGNORES_SHIELD = False    # if True, shield won't protect vs net
+NET_COLOR = (220, 80, 220, 90)  # translucent purple fill
+NET_RING = (235, 180, 245)      # ring outline color
 
 
 # --- Defeat by length ---
@@ -326,6 +337,7 @@ LOSE_LENGTH = 60.0  # if a snake length <= 60, it loses
 
 spawned_chunks = set()  # {(cx, cy)}
 foods = []              # list of dicts: {"x","y","r","kind"}
+nets = []  # list of dicts: {"x","y","r","owner","until"}
 
 def chunk_of(px: float, py: float):
     cx = math.floor(px / CHUNK_SIZE)
@@ -539,6 +551,48 @@ def ensure_chunks_around(px: float, py: float, radius_chunks: int = 1) -> None:
                 spawn_chunk(*key)
                 spawned_chunks.add(key)
 
+# --- Net helpers ---
+def _net_radius_for(s: Snake) -> float:
+    r = NET_RADIUS_PER_LEN * s.length
+    return clamp(r, NET_RADIUS_MIN, NET_RADIUS_MAX)
+
+def cast_net(caster: Snake) -> None:
+    nets.append({
+        "x": caster.x,
+        "y": caster.y,
+        "r": _net_radius_for(caster),
+        "owner": caster,
+        "until": time.time() + NET_DURATION,
+    })
+
+def update_nets() -> None:
+    now = time.time()
+    # drop expired nets
+    keep = [n for n in nets if now < n["until"]]
+    nets[:] = keep
+
+def apply_net_effect(snakes: list[Snake], dt: float) -> None:
+    if not nets:
+        return
+    for s in snakes:
+        # nets only harm if cast by the other snake (owner != s)
+        harmful = False
+        for n in nets:
+            if n["owner"] is s:
+                continue
+            dx = s.x - n["x"]
+            dy = s.y - n["y"]
+            if (dx*dx + dy*dy) <= (n["r"] * n["r"]):
+                # inside enemy net
+                harmful = True
+                break
+        if harmful:
+            if NET_IGNORES_SHIELD or not s.is_shield_active():
+                old_len = s.length
+                s.length = max(0.0, s.length - NET_DECAY_RATE * dt)
+                if s.length < old_len:
+                    s._trim_trail_to_length()
+
 
 def cull_far_foods(px: float, py: float, keep_radius_chunks: int = 2) -> None:
     """Remove foods too far away to keep memory bounded."""
@@ -593,6 +647,19 @@ def draw_foods(surf: pygame.Surface, camx: float, camy: float) -> None:
 def draw_world_border(surf: pygame.Surface, camx: float, camy: float) -> None:
     cx, cy = world_to_screen(0, 0, camx, camy)
     pygame.draw.circle(surf, (80, 80, 80), (cx, cy), int(SAFE_R), 2)
+
+# --- Net draw ---
+def draw_nets(surf: pygame.Surface, camx: float, camy: float) -> None:
+    if not nets:
+        return
+    for n in nets:
+        sx, sy = world_to_screen(n["x"], n["y"], camx, camy)
+        # filled translucent disk
+        disk = pygame.Surface((int(n["r"]*2)+4, int(n["r"]*2)+4), pygame.SRCALPHA)
+        pygame.draw.circle(disk, NET_COLOR, (disk.get_width()//2, disk.get_height()//2), int(n["r"]))
+        # outline ring
+        pygame.draw.circle(disk, NET_RING, (disk.get_width()//2, disk.get_height()//2), int(n["r"]), 2)
+        surf.blit(disk, (sx - disk.get_width()//2, sy - disk.get_height()//2))
 
 # --- Poison Zone Blink Warning ---
 def draw_poison_blink(surf: pygame.Surface) -> None:
@@ -877,6 +944,13 @@ def main():
                     game_state = "menu"
                 continue
 
+            # --- Net keybindings ---
+            elif e.type == pygame.KEYDOWN:
+                if e.key == pygame.K_e:  # P1: cast net with E
+                    cast_net(snake1)
+                elif e.key == pygame.K_RSHIFT:  # P2: cast net with Right Shift
+                    cast_net(snake2)
+
             if game_state == "menu":
                 if e.type == pygame.KEYDOWN:
                     if e.key == pygame.K_1:
@@ -900,10 +974,12 @@ def main():
             ensure_chunks_around(snake1.x, snake1.y, radius_chunks=1)
             cull_far_foods(snake1.x, snake1.y, keep_radius_chunks=2)
             periodic_spawn_around([(snake1.x, snake1.y)])
+            update_nets()
 
             # Update P1
             snake1.update(dt)
             total_eaten1 += eat_food_if_colliding(snake1)
+            apply_net_effect([snake1], dt)
 
             # Camera follows P1 (full-screen)
             camx = snake1.x - W / 2
@@ -912,6 +988,7 @@ def main():
             # Draw full-screen
             screen.fill(BG_COLOR)
             draw_world_border(screen, camx, camy)
+            draw_nets(screen, camx, camy)
             draw_foods(screen, camx, camy)
             snake1.draw(screen, camx, camy)
             if snake1.is_in_poison: draw_poison_blink(screen)
@@ -931,12 +1008,14 @@ def main():
         midy = 0.5 * (snake1.y + snake2.y)
         cull_far_foods(midx, midy, keep_radius_chunks=2)
         periodic_spawn_around([(snake1.x, snake1.y), (snake2.x, snake2.y)])
+        update_nets()
 
         # Update both
         snake1.update(dt)
         snake2.update(dt)
         total_eaten1 += eat_food_if_colliding(snake1)
         total_eaten2 += eat_food_if_colliding(snake2)
+        apply_net_effect([snake1, snake2], dt)
 
 
         # Head-on predation (elimination logic)
@@ -978,6 +1057,7 @@ def main():
         # Left view (P1)
         left.fill(BG_COLOR)
         draw_world_border(left, cam1x, cam1y)
+        draw_nets(left, cam1x, cam1y)
         draw_foods(left, cam1x, cam1y)
         snake1.draw(left, cam1x, cam1y)
         snake2.draw(left, cam1x, cam1y)
@@ -990,6 +1070,7 @@ def main():
         # Right view (P2)
         right.fill(BG_COLOR)
         draw_world_border(right, cam2x, cam2y)
+        draw_nets(right, cam2x, cam2y)
         draw_foods(right, cam2x, cam2y)
         snake1.draw(right, cam2x, cam2y)
         snake2.draw(right, cam2x, cam2y)
