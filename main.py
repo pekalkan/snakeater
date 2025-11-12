@@ -1289,7 +1289,7 @@ def main():
             next_shrink_time = now + SHRINK_INTERVAL
             # Play shrink SFX once when the safe zone shrinks
             if 'sfx_shrink' in globals() and sfx_shrink:
-                sfx_shrink.play()
+                sfx_shrink.play(maxtime=3000)  # only play first 3000 ms (3 seconds)
 
         # Events
         for e in pygame.event.get():
