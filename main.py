@@ -12,6 +12,47 @@ pygame.mixer.init()
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MUSIC_PATH = os.path.join(BASE_DIR, "assets", "background.ogg")   # absolute path resolved next to this file
 MUSIC_VOLUME = 0.5
+
+# ---- SFX (shield, mine, poison) ----
+SFX_DIR = os.path.join(BASE_DIR, "assets")
+SFX_SHIELD_PATH = os.path.join(SFX_DIR, "shield.mp3")
+SFX_MINE_PATH   = os.path.join(SFX_DIR, "mine.mp3")
+SFX_POISON_PATH = os.path.join(SFX_DIR, "poison.mp3")
+SFX_VOLUME = 0.7
+
+# Load sounds (keep try/except so game still runs if a file is missing)
+try:
+    sfx_shield = pygame.mixer.Sound(SFX_SHIELD_PATH)
+    sfx_shield.set_volume(SFX_VOLUME)
+except Exception as _e:
+    sfx_shield = None
+    print(f"[sfx] shield not loaded: {SFX_SHIELD_PATH} ({_e})")
+try:
+    sfx_mine = pygame.mixer.Sound(SFX_MINE_PATH)
+    sfx_mine.set_volume(SFX_VOLUME)
+except Exception as _e:
+    sfx_mine = None
+    print(f"[sfx] mine not loaded: {SFX_MINE_PATH} ({_e})")
+try:
+    sfx_poison = pygame.mixer.Sound(SFX_POISON_PATH)
+    sfx_poison.set_volume(0.5)  # ambience a bit lower
+except Exception as _e:
+    sfx_poison = None
+    print(f"[sfx] poison not loaded: {SFX_POISON_PATH} ({_e})")
+
+# Dedicated channel for looping poison ambience (so it doesn't fight with other SFX)
+POISON_CH_INDEX = 5
+poison_ch = pygame.mixer.Channel(POISON_CH_INDEX)
+poison_looping = False
+
+def set_poison_loop(should_play: bool):
+    global poison_looping
+    if should_play and not poison_looping and sfx_poison is not None:
+        poison_ch.play(sfx_poison, loops=-1, fade_ms=150)
+        poison_looping = True
+    elif not should_play and poison_looping:
+        poison_ch.fadeout(200)
+        poison_looping = False
 W, H = 1366, 768
 screen = pygame.display.set_mode((W, H))
 pygame.display.set_caption("snakeater - shields added")
@@ -728,6 +769,8 @@ def eat_food_if_colliding(snake: Snake) -> int:
             kind = f.get("kind")
             if kind == "shield":
                 snake.apply_shield(SHIELD_DURATION)
+                if sfx_shield: 
+                    sfx_shield.play()
             elif kind == "mine":
                 # Arm a timed mine at this location; detonates after MINE_ARM_TIME
                 mines.append({
@@ -831,6 +874,8 @@ def update_and_detonate_mines(snakes: list[Snake]) -> None:
             keep.append(m)
             continue
         # detonate now
+        if sfx_mine:
+            sfx_mine.play()
         cx, cy, br = m["x"], m["y"], m["blast_r"]
         for s in snakes:
             # head inside => instant death (set length 0 so length-based defeat triggers)
@@ -1195,6 +1240,8 @@ def main():
     loser = None
     music_paused = False
     play_bg_music()  # start looping background music once
+    prev_p1_poison = False
+    prev_p2_poison = False
 
     # Safe zone shrink scheduling
     next_shrink_time = time.time() + SHRINK_INTERVAL
@@ -1304,6 +1351,9 @@ def main():
             total_eaten1 += eat_food_if_colliding(snake1)
             apply_net_effect([snake1], dt)
             update_and_detonate_mines([snake1])
+            # Poison ambience control (any poison -> loop on, none -> off)
+            set_poison_loop(snake1.is_in_poison)
+            prev_p1_poison = snake1.is_in_poison
 
             # Camera follows P1 (full-screen)
             camx = snake1.x - W / 2
@@ -1342,6 +1392,11 @@ def main():
             total_eaten2 += eat_food_if_colliding(snake2)
             apply_net_effect([snake1, snake2], dt)
             update_and_detonate_mines([snake1, snake2])
+
+            # Poison ambience control: loop if any player is in poison
+            set_poison_loop(snake1.is_in_poison or snake2.is_in_poison)
+            prev_p1_poison = snake1.is_in_poison
+            prev_p2_poison = snake2.is_in_poison
 
             # Head-on predation (elimination logic)
             res = eat_and_maybe_eliminate(snake1, snake2)
