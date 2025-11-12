@@ -126,9 +126,9 @@ MINIMAP_BG     = (20, 20, 20, 170)
 MINIMAP_BORDER = (120, 120, 120)
 
 # ---------------- Finite World Bounds (CIRCULAR) ----------------
-# Keep the original rectangle numbers only to infer an initial radius.
+# World size scale: previously 3.0, now doubled to 6.0 for a much larger play area
 _RECT_W, _RECT_H = 4320, 2430
-WORLD_DIAMETER_SCALE = 3.0                 # triple the base diameter
+WORLD_DIAMETER_SCALE = 6.0
 BASE_DIAMETER = min(_RECT_W, _RECT_H)
 SAFE_R = int((BASE_DIAMETER * WORLD_DIAMETER_SCALE) / 2)   # scaled initial safe radius
 SAFE_R_INIT = SAFE_R
