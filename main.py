@@ -330,6 +330,7 @@ SHIELD_DURATION = 5.0             # each pickup grants 5 s protection
 
  # --- Net (circular trap) mechanic ---
 NET_COOLDOWN = 20.0
+NET_OFFSET_FRAC = 0.25       # net spawns this fraction of snake length ahead of head
 NET_DURATION = 2.0            # seconds the net persists
 NET_RADIUS_PER_LEN = 0.45     # radius = this * caster.length
 NET_RADIUS_MIN = 120.0        # clamp minimum radius
@@ -586,8 +587,8 @@ def cast_net(caster: Snake) -> None:
         return
     caster.last_net_time = now
 
-    # Spawn the net starting at the head position and projected forward by quarter-length
-    off = 0.25 * caster.length
+    # Spawn the net slightly ahead of the head, proportional to current length
+    off = NET_OFFSET_FRAC * caster.length
     nx = caster.x + caster.heading_x * off
     ny = caster.y + caster.heading_y * off
     nets.append({
