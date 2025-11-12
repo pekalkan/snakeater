@@ -33,6 +33,11 @@ SHIELD_COLOR   = (120, 255, 120)  # green shield orb
 POISON_WARN_BG = (160, 30, 30, 160)
 POISON_WARN_TEXT = (255, 230, 230)
 
+ # HUD extra colors
+SPEED_YELLOW   = (255, 220, 0)
+CD_READY       = (120, 255, 120)
+CD_WAIT        = (255, 180, 70)
+
 # ---------------- Minimap (bottom-right overlay) ----------------
 MINIMAP_SIZE   = 180        # square panel size (pixels)
 MINIMAP_MARGIN = 14         # margin from screen edges
@@ -323,7 +328,8 @@ START_LENGTH = 250.0           # respawn starting trail length (matches Snake.__
 SHIELD_FRACTION = 0.05  # 5% of foods are shields
 SHIELD_DURATION = 5.0             # each pickup grants 5 s protection
 
-# --- Net (circular trap) mechanic ---
+ # --- Net (circular trap) mechanic ---
+NET_COOLDOWN = 20.0
 NET_DURATION = 2.0            # seconds the net persists
 NET_RADIUS_PER_LEN = 0.45     # radius = this * caster.length
 NET_RADIUS_MIN = 120.0        # clamp minimum radius
@@ -576,7 +582,7 @@ def _net_radius_for(s: Snake) -> float:
 def cast_net(caster: Snake) -> None:
     now = time.time()
     # Cooldown check
-    if hasattr(caster, "last_net_time") and now - caster.last_net_time < 20.0:
+    if hasattr(caster, "last_net_time") and now - caster.last_net_time < NET_COOLDOWN:
         return
     caster.last_net_time = now
 
@@ -769,6 +775,21 @@ def draw_game_over_overlay(surf: pygame.Surface, title: str) -> None:
     surf.blit(ts, (x + 2, y + 2))
     surf.blit(t,  (x, y))
 
+# --- HUD multi-color helper ---
+def _render_hud_segments(segments: list[tuple[str, tuple[int, int, int]]]) -> pygame.Surface:
+    """Render a single-line HUD by concatenating (text, color) segments."""
+    pieces = [FONT.render(txt, True, col) for (txt, col) in segments if txt]
+    if not pieces:
+        return pygame.Surface((1, 1), pygame.SRCALPHA)
+    w = sum(p.get_width() for p in pieces)
+    h = max(p.get_height() for p in pieces)
+    surf = pygame.Surface((w, h), pygame.SRCALPHA)
+    x = 0
+    for p in pieces:
+        surf.blit(p, (x, 0))
+        x += p.get_width()
+    return surf
+
 def draw_start_menu(surf: pygame.Surface, btn1_rect: pygame.Rect, btn2_rect: pygame.Rect) -> None:
     surf.fill(BG_COLOR)
     # Title and hint
@@ -871,10 +892,31 @@ def eat_and_maybe_eliminate(attacker: Snake, defender: Snake) -> str:
 
 # ---------------- HUD ----------------
 def draw_hud_one(surf: pygame.Surface, s: Snake, eaten: int, label: str = "") -> None:
-    sh_left = max(0, int(s.shield_until - time.time()))
-    sh_text = f"   SHD {sh_left:2d}s" if sh_left > 0 else ""
-    text = f"{label} LEN {int(s.length):4d}   SPD {int(s.speed_current):3d}   FOOD {eaten:3d}{sh_text}".strip()
-    txt = FONT.render(text, True, HUD_TEXT)
+    now = time.time()
+    sh_left = max(0, int(s.shield_until - now))
+    # Net cooldown remaining
+    if hasattr(s, "last_net_time"):
+        cd = max(0, int(NET_COOLDOWN - (now - s.last_net_time)))
+    else:
+        cd = 0
+
+    segs: list[tuple[str, tuple[int, int, int]]] = []
+    if label:
+        segs.append((f"{label} ", HUD_TEXT))
+    segs.extend([
+        ("LEN ", HUD_TEXT), (f"{int(s.length):4d}", HUD_TEXT), ("   ", HUD_TEXT),
+        ("SPD ", HUD_TEXT), (f"{int(s.speed_current):3d}", SPEED_YELLOW), ("   ", HUD_TEXT),
+        ("FOOD ", HUD_TEXT), (f"{eaten:3d}", HUD_TEXT),
+    ])
+    if sh_left > 0:
+        segs.extend([("   SHD ", CD_READY), (f"{sh_left:2d}s", CD_READY)])
+    # Net cooldown segment
+    if cd == 0:
+        segs.extend([("   NET ", HUD_TEXT), ("READY", CD_READY)])
+    else:
+        segs.extend([("   NET ", HUD_TEXT), (f"{cd:2d}s", CD_WAIT)])
+
+    txt = _render_hud_segments(segs)
     pad = 10
     w = txt.get_width() + pad * 2
     h = txt.get_height() + pad * 2
@@ -884,12 +926,26 @@ def draw_hud_one(surf: pygame.Surface, s: Snake, eaten: int, label: str = "") ->
     surf.blit(hud, (12, 10))
 
 def draw_hud_two(surf: pygame.Surface, s1: Snake, eaten1: int, s2: Snake, eaten2: int) -> None:
-    # left panel (P1)
-    sh1 = max(0, int(s1.shield_until - time.time()))
-    sh2 = max(0, int(s2.shield_until - time.time()))
-    text1 = f"P1 LEN {int(s1.length):4d}   SPD {int(s1.speed_current):3d}   FOOD {eaten1:3d}" + (f"   SHD {sh1:2d}s" if sh1 > 0 else "")
-    txt1 = FONT.render(text1, True, HUD_TEXT)
+    now = time.time()
     pad = 10
+
+    # ---- P1 panel ----
+    sh1 = max(0, int(s1.shield_until - now))
+    cd1 = max(0, int(NET_COOLDOWN - (now - getattr(s1, "last_net_time", 0)))) if hasattr(s1, "last_net_time") else 0
+    segs1: list[tuple[str, tuple[int, int, int]]] = [
+        ("P1 ", HUD_TEXT),
+        ("LEN ", HUD_TEXT), (f"{int(s1.length):4d}", HUD_TEXT), ("   ", HUD_TEXT),
+        ("SPD ", HUD_TEXT), (f"{int(s1.speed_current):3d}", SPEED_YELLOW), ("   ", HUD_TEXT),
+        ("FOOD ", HUD_TEXT), (f"{eaten1:3d}", HUD_TEXT),
+    ]
+    if sh1 > 0:
+        segs1.extend([("   SHD ", CD_READY), (f"{sh1:2d}s", CD_READY)])
+    if cd1 == 0:
+        segs1.extend([("   NET ", HUD_TEXT), ("READY", CD_READY)])
+    else:
+        segs1.extend([("   NET ", HUD_TEXT), (f"{cd1:2d}s", CD_WAIT)])
+
+    txt1 = _render_hud_segments(segs1)
     w1 = txt1.get_width() + pad * 2
     h1 = txt1.get_height() + pad * 2
     hud1 = pygame.Surface((w1, h1), pygame.SRCALPHA)
@@ -897,9 +953,23 @@ def draw_hud_two(surf: pygame.Surface, s1: Snake, eaten1: int, s2: Snake, eaten2
     hud1.blit(txt1, (pad, pad))
     surf.blit(hud1, (12, 10))
 
-    # right panel (P2)
-    text2 = f"P2 LEN {int(s2.length):4d}   SPD {int(s2.speed_current):3d}   FOOD {eaten2:3d}" + (f"   SHD {sh2:2d}s" if sh2 > 0 else "")
-    txt2 = FONT.render(text2, True, HUD_TEXT)
+    # ---- P2 panel ----
+    sh2 = max(0, int(s2.shield_until - now))
+    cd2 = max(0, int(NET_COOLDOWN - (now - getattr(s2, "last_net_time", 0)))) if hasattr(s2, "last_net_time") else 0
+    segs2: list[tuple[str, tuple[int, int, int]]] = [
+        ("P2 ", HUD_TEXT),
+        ("LEN ", HUD_TEXT), (f"{int(s2.length):4d}", HUD_TEXT), ("   ", HUD_TEXT),
+        ("SPD ", HUD_TEXT), (f"{int(s2.speed_current):3d}", SPEED_YELLOW), ("   ", HUD_TEXT),
+        ("FOOD ", HUD_TEXT), (f"{eaten2:3d}", HUD_TEXT),
+    ]
+    if sh2 > 0:
+        segs2.extend([("   SHD ", CD_READY), (f"{sh2:2d}s", CD_READY)])
+    if cd2 == 0:
+        segs2.extend([("   NET ", HUD_TEXT), ("READY", CD_READY)])
+    else:
+        segs2.extend([("   NET ", HUD_TEXT), (f"{cd2:2d}s", CD_WAIT)])
+
+    txt2 = _render_hud_segments(segs2)
     w2 = txt2.get_width() + pad * 2
     h2 = txt2.get_height() + pad * 2
     hud2 = pygame.Surface((w2, h2), pygame.SRCALPHA)
