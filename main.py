@@ -1149,8 +1149,13 @@ controls_p2 = (pygame.K_LEFT, pygame.K_RIGHT, pygame.K_UP, pygame.K_DOWN)   # le
 snake1 = Snake(-120.0, 0.0, controls_p1, SNAKE_BODY, SNAKE_HEAD)
 snake2 = Snake( 120.0, 0.0, controls_p2, SNAKE2_BODY, SNAKE2_HEAD)
 
+
 total_eaten1 = 0
 total_eaten2 = 0
+
+# --- Match score (persists until app exit) ---
+p1_score = 0
+p2_score = 0
 
 def main():
     global total_eaten1, total_eaten2, SAFE_R, shrink_notice_until, snake1, snake2, last_density_spawn, last_near_shield_spawn
@@ -1159,6 +1164,8 @@ def main():
     game_mode = None  # "1p" or "2p"
     game_over = False
     loser = None
+    # track whether the current round's result has been counted to the match score
+    round_scored = False
 
     # Safe zone shrink scheduling
     next_shrink_time = time.time() + SHRINK_INTERVAL
@@ -1213,6 +1220,8 @@ def main():
                     game_state = "game"
                 else:
                     game_state = "menu"
+                # new round starts; do not touch p1_score/p2_score so they persist until app exit
+                round_scored = False
                 continue
 
             # --- Net keybindings ---
@@ -1318,6 +1327,14 @@ def main():
                     game_over = True
                     loser = "P2"
 
+        # If the round just ended, increment the persistent match score once
+        if game_over and not round_scored:
+            if loser == "P1":
+                p2_score += 1
+            elif loser == "P2":
+                p1_score += 1
+            round_scored = True
+
         # Cameras per player
         view_w = W // 2
         cam1x = snake1.x - view_w / 2
@@ -1341,6 +1358,7 @@ def main():
         draw_shrink_notice(left)
         draw_hud_one(left, snake1, total_eaten1, "P1")
         draw_mode_badge(left, "MODE: 2P")
+        draw_match_score(left)
         draw_minimap(left, [snake1])
 
         # Right view (P2)
@@ -1355,6 +1373,7 @@ def main():
         draw_shrink_notice(right)
         draw_hud_one(right, snake2, total_eaten2, "P2")
         draw_mode_badge(right, "MODE: 2P")
+        draw_match_score(right)
         draw_minimap(right, [snake2])
 
         # Draw overlay for win/lose
@@ -1389,6 +1408,21 @@ def draw_mode_badge(surf: pygame.Surface, text: str) -> None:
     box.blit(badge, (pad, pad))
     # place slightly under the main HUD blocks
     surf.blit(box, (12, 50))
+
+# --- Persistent match score (2P) ---
+def draw_match_score(surf: pygame.Surface) -> None:
+    """Draw persistent P1–P2 match score centered at top; survives R restarts."""
+    label = f"SCORE  P1 {p1_score}  -  {p2_score} P2"
+    txt = FONT.render(label, True, (255, 230, 120))
+    pad = 8
+    w = txt.get_width() + 2 * pad
+    h = txt.get_height() + 2 * pad
+    box = pygame.Surface((w, h), pygame.SRCALPHA)
+    pygame.draw.rect(box, HUD_BG, box.get_rect(), border_radius=8)
+    box.blit(txt, (pad, pad))
+    x = (surf.get_width() - w) // 2
+    y = 8
+    surf.blit(box, (x, y))
 
 if __name__ == "__main__":
     main()
