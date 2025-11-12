@@ -1142,6 +1142,20 @@ def place_players_opposite_edges() -> None:
     _face_in(snake1)
     _face_in(snake2)
 
+# --- Helper: spawn both players at random positions with random headings ---
+def place_players_random() -> None:
+    """Place snake1 and snake2 at random positions inside the safe circle with random headings."""
+    global snake1, snake2
+    x1, y1 = random_spawn_inside_world()
+    x2, y2 = random_spawn_inside_world()
+    snake1.respawn(x1, y1)
+    snake2.respawn(x2, y2)
+    # give both a random initial heading
+    for s in (snake1, snake2):
+        ang = random.uniform(0.0, 2.0 * math.pi)
+        s.heading_x = math.cos(ang)
+        s.heading_y = math.sin(ang)
+
 # ---------------- Main Loop ----------------
 controls_p1 = (pygame.K_a, pygame.K_d, pygame.K_w, pygame.K_s)              # left, right, up, down
 controls_p2 = (pygame.K_LEFT, pygame.K_RIGHT, pygame.K_UP, pygame.K_DOWN)   # left, right, up, down
@@ -1153,9 +1167,6 @@ snake2 = Snake( 120.0, 0.0, controls_p2, SNAKE2_BODY, SNAKE2_HEAD)
 total_eaten1 = 0
 total_eaten2 = 0
 
-# --- Match score (persists until app exit) ---
-p1_score = 0
-p2_score = 0
 
 def main():
     global total_eaten1, total_eaten2, SAFE_R, shrink_notice_until, snake1, snake2, last_density_spawn, last_near_shield_spawn
@@ -1164,8 +1175,6 @@ def main():
     game_mode = None  # "1p" or "2p"
     game_over = False
     loser = None
-    # track whether the current round's result has been counted to the match score
-    round_scored = False
 
     # Safe zone shrink scheduling
     next_shrink_time = time.time() + SHRINK_INTERVAL
@@ -1179,9 +1188,9 @@ def main():
     while running:
         dt = clock.tick(60) / 1000.0
 
-        # Periodic safe zone shrink
+        # Periodic safe zone shrink (only during gameplay)
         now = time.time()
-        if now >= next_shrink_time:
+        if game_state == "game" and now >= next_shrink_time:
             shrink_world_centered(SHRINK_FACTOR)
             shrink_notice_until = now + SHRINK_NOTICE_SECS
             next_shrink_time = now + SHRINK_INTERVAL
@@ -1191,7 +1200,12 @@ def main():
             if e.type == pygame.QUIT:
                 running = False
             elif e.type == pygame.KEYDOWN and e.key == pygame.K_ESCAPE:
-                running = False
+                # Return to start screen (mode select) without quitting
+                game_state = "menu"
+                game_mode = None
+                game_over = False
+                loser = None
+                shrink_notice_until = 0.0
             elif e.type == pygame.KEYDOWN and e.key == pygame.K_r:
                 # Restart: reset world, foods, snakes, timers, flags
                 foods.clear()
@@ -1209,7 +1223,7 @@ def main():
                 snake1 = Snake(-120.0, 0.0, controls_p1, SNAKE_BODY, SNAKE_HEAD)
                 snake2 = Snake( 120.0, 0.0, controls_p2, SNAKE2_BODY, SNAKE2_HEAD)
                 if game_mode == "2p":
-                    place_players_opposite_edges()
+                    place_players_random()
                 # timers & flags
                 next_shrink_time = time.time() + SHRINK_INTERVAL
                 shrink_notice_until = 0.0
@@ -1220,8 +1234,7 @@ def main():
                     game_state = "game"
                 else:
                     game_state = "menu"
-                # new round starts; do not touch p1_score/p2_score so they persist until app exit
-                round_scored = False
+                # new round starts
                 continue
 
             # --- Net keybindings ---
@@ -1237,13 +1250,13 @@ def main():
                         game_mode = "1p"; game_state = "game"
                     elif e.key == pygame.K_2:
                         game_mode = "2p"; game_state = "game"
-                        place_players_opposite_edges()
+                        place_players_random()
                 elif e.type == pygame.MOUSEBUTTONDOWN and e.button == 1:
                     if btn1_rect.collidepoint(e.pos):
                         game_mode = "1p"; game_state = "game"
                     elif btn2_rect.collidepoint(e.pos):
                         game_mode = "2p"; game_state = "game"
-                        place_players_opposite_edges()
+                        place_players_random()
 
         if game_state == "menu":
             draw_start_menu(screen, btn1_rect, btn2_rect)
@@ -1327,13 +1340,6 @@ def main():
                     game_over = True
                     loser = "P2"
 
-        # If the round just ended, increment the persistent match score once
-        if game_over and not round_scored:
-            if loser == "P1":
-                p2_score += 1
-            elif loser == "P2":
-                p1_score += 1
-            round_scored = True
 
         # Cameras per player
         view_w = W // 2
@@ -1358,7 +1364,6 @@ def main():
         draw_shrink_notice(left)
         draw_hud_one(left, snake1, total_eaten1, "P1")
         draw_mode_badge(left, "MODE: 2P")
-        draw_match_score(left)
         draw_minimap(left, [snake1])
 
         # Right view (P2)
@@ -1373,7 +1378,6 @@ def main():
         draw_shrink_notice(right)
         draw_hud_one(right, snake2, total_eaten2, "P2")
         draw_mode_badge(right, "MODE: 2P")
-        draw_match_score(right)
         draw_minimap(right, [snake2])
 
         # Draw overlay for win/lose
@@ -1409,20 +1413,6 @@ def draw_mode_badge(surf: pygame.Surface, text: str) -> None:
     # place slightly under the main HUD blocks
     surf.blit(box, (12, 50))
 
-# --- Persistent match score (2P) ---
-def draw_match_score(surf: pygame.Surface) -> None:
-    """Draw persistent P1–P2 match score centered at top; survives R restarts."""
-    label = f"SCORE  P1 {p1_score}  -  {p2_score} P2"
-    txt = FONT.render(label, True, (255, 230, 120))
-    pad = 8
-    w = txt.get_width() + 2 * pad
-    h = txt.get_height() + 2 * pad
-    box = pygame.Surface((w, h), pygame.SRCALPHA)
-    pygame.draw.rect(box, HUD_BG, box.get_rect(), border_radius=8)
-    box.blit(txt, (pad, pad))
-    x = (surf.get_width() - w) // 2
-    y = 8
-    surf.blit(box, (x, y))
 
 if __name__ == "__main__":
     main()
