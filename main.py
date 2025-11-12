@@ -899,12 +899,19 @@ def draw_minimap(surf: pygame.Surface, snakes: list[Snake]) -> None:
 
 # --- Overlay: Game Over / Win/Lose ---
 def draw_game_over_overlay(surf: pygame.Surface, title: str) -> None:
-    t = TITLE_FONT.render(title, True, (255, 230, 230))
-    ts = TITLE_FONT.render(title, True, (40, 0, 0))
+    t = TITLE_FONT.render(title, True, (255, 60, 60))   # bright red title
+    ts = TITLE_FONT.render(title, True, (120, 0, 0))    # darker red shadow
     x = (surf.get_width() - t.get_width()) // 2
     y = surf.get_height() // 2 - t.get_height()
     surf.blit(ts, (x + 2, y + 2))
     surf.blit(t,  (x, y))
+
+# --- Restart hint under game-over overlay ---
+def draw_restart_hint(surf: pygame.Surface) -> None:
+    hint = FONT.render("Press R to restart", True, (235, 245, 235))
+    x = (surf.get_width() - hint.get_width()) // 2
+    y = surf.get_height() // 2 + 12
+    surf.blit(hint, (x, y))
 
 # --- HUD multi-color helper ---
 def _render_hud_segments(segments: list[tuple[str, tuple[int, int, int]]]) -> pygame.Surface:
@@ -1277,16 +1284,16 @@ def main():
         periodic_spawn_around([(snake1.x, snake1.y), (snake2.x, snake2.y)])
         update_nets()
 
-        # Update both
-        snake1.update(dt)
-        snake2.update(dt)
-        total_eaten1 += eat_food_if_colliding(snake1)
-        total_eaten2 += eat_food_if_colliding(snake2)
-        apply_net_effect([snake1, snake2], dt)
-        update_and_detonate_mines([snake1, snake2])
-
-        # Head-on predation (elimination logic)
+        # Update both only if the round is ongoing
         if not game_over:
+            snake1.update(dt)
+            snake2.update(dt)
+            total_eaten1 += eat_food_if_colliding(snake1)
+            total_eaten2 += eat_food_if_colliding(snake2)
+            apply_net_effect([snake1, snake2], dt)
+            update_and_detonate_mines([snake1, snake2])
+
+            # Head-on predation (elimination logic)
             res = eat_and_maybe_eliminate(snake1, snake2)
             if res == "attacker_win":
                 game_over = True
@@ -1297,18 +1304,19 @@ def main():
                     game_over = True
                     loser = "P1"
 
-        # Steal mechanic both ways – shield blocks being cut
-        _ = steal_if_cross(snake1, snake2)
-        _ = steal_if_cross(snake2, snake1)
+            # Steal mechanic both ways – shield blocks being cut
+            if not game_over:
+                _ = steal_if_cross(snake1, snake2)
+                _ = steal_if_cross(snake2, snake1)
 
-        # Length-based defeat
-        if not game_over:
-            if snake1.length <= LOSE_LENGTH:
-                game_over = True
-                loser = "P1"
-            elif snake2.length <= LOSE_LENGTH:
-                game_over = True
-                loser = "P2"
+            # Length-based defeat
+            if not game_over:
+                if snake1.length <= LOSE_LENGTH:
+                    game_over = True
+                    loser = "P1"
+                elif snake2.length <= LOSE_LENGTH:
+                    game_over = True
+                    loser = "P2"
 
         # Cameras per player
         view_w = W // 2
@@ -1352,10 +1360,14 @@ def main():
         # Draw overlay for win/lose
         if game_over and loser == "P1":
             draw_game_over_overlay(left, "YOU LOSE")
+            draw_restart_hint(left)
             draw_game_over_overlay(right, "YOU WIN")
+            draw_restart_hint(right)
         elif game_over and loser == "P2":
             draw_game_over_overlay(left, "YOU WIN")
+            draw_restart_hint(left)
             draw_game_over_overlay(right, "YOU LOSE")
+            draw_restart_hint(right)
 
         # Compose to screen
         screen.blit(left, (0, 0))
