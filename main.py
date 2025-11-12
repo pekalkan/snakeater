@@ -313,7 +313,7 @@ FOOD_GROWTH = 30.0  # base growth used for speed-decay normalization and default
 SPEED_DECAY_PER_FOOD = 0.01
 SPEED_DECAY_PER_LENGTH = SPEED_DECAY_PER_FOOD / FOOD_GROWTH  # per pixel of length gained
 MIN_SIZE_SPEED_FACTOR = 0.5  # minimum cap: 50% of intended speed
-BOOST_FRACTION = 0.05   # 5% of foods are boost orbs
+BOOST_FRACTION = 0.10   # 10% boost
 BOOST_MULT     = 1.5    # move at 1.5x when boosted
 BOOST_DURATION = 5.0    # boost lasts 5 seconds
 PREDATION_RATIO = 1.0    # attacker must be > (ratio × defender.length) to steal
@@ -324,11 +324,11 @@ START_LENGTH = 250.0           # respawn starting trail length (matches Snake.__
 
  # --- Shields (green protection) ---
 
-SHIELD_FRACTION = 0.05  # 5% of foods are shields
+SHIELD_FRACTION = 0.08  # 8% shield
 SHIELD_DURATION = 5.0             # each pickup grants 5 s protection
 
 # --- Red Mines (trap food) ---
-MINE_FRACTION = 0.05   # 5% of foods are red mines
+MINE_FRACTION = 0.07   # 7% mines
 MINE_ARM_TIME = 3.0    # seconds from eat to detonation
 MINE_BLAST_RADIUS = 180.0  # explosion radius in pixels
 MINE_COLOR = (220, 60, 60)
@@ -434,9 +434,42 @@ def spawn_chunk(cx: int, cy: int) -> None:
             pass
 
 # ---------------- Spawn Balancer (per chunk) ----------------
-TARGET_PER_CHUNK = FOOD_PER_CHUNK  # desired items per active chunk
-MIN_BOOST_PER_CHUNK = 0            # no per-chunk boost guarantee
-MIN_SHIELD_PER_CHUNK = 0           # no per-chunk shield guarantee (lets rate drop by ~50%)
+TARGET_PER_CHUNK = 5               # desired items per active chunk (increases density)
+MIN_BOOST_PER_CHUNK = 1            # guarantee at least one boost per active chunk
+MIN_SHIELD_PER_CHUNK = 1           # guarantee at least one shield per active chunk
+MIN_MINE_PER_CHUNK = 1             # guarantee at least one mine per active chunk
+
+
+# --- Helper: spawn a mixture of item kinds according to global fractions ---
+def spawn_mixed_in_chunk(cx: int, cy: int, n: int) -> None:
+    """Spawn n items in chunk (cx,cy) using BOOST/SHIELD/MINE fractions; rest normal."""
+    if n <= 0:
+        return
+    left = cx * CHUNK_SIZE
+    top = cy * CHUNK_SIZE
+    margin = 20
+    minx = left + margin
+    maxx = left + CHUNK_SIZE - margin
+    miny = top + margin
+    maxy = top + CHUNK_SIZE - margin
+    if minx >= maxx or miny >= maxy:
+        return
+    for _ in range(n):
+        for __ in range(10):
+            fx = random.uniform(minx, maxx)
+            fy = random.uniform(miny, maxy)
+            if math.hypot(fx, fy) <= SAFE_R - 10:
+                r = random.random()
+                if r < BOOST_FRACTION:
+                    kind = "boost"
+                elif r < BOOST_FRACTION + SHIELD_FRACTION:
+                    kind = "shield"
+                elif r < BOOST_FRACTION + SHIELD_FRACTION + MINE_FRACTION:
+                    kind = "mine"
+                else:
+                    kind = "normal"
+                foods.append(_make_food(fx, fy, kind))
+                break
 
 def spawn_items_in_chunk(cx: int, cy: int, n: int, kind: str) -> None:
     if n <= 0:
@@ -535,10 +568,11 @@ def periodic_spawn_around(points: list[tuple[float, float]]) -> None:
             spawn_chunk(*key)
             spawned_chunks.add(key)
 
-    # Count totals, boosts, shields per key
+    # Count totals, boosts, shields, mines per key
     total_counts: dict[tuple[int, int], int] = {k: 0 for k in keys}
     boost_counts: dict[tuple[int, int], int] = {k: 0 for k in keys}
     shield_counts: dict[tuple[int, int], int] = {k: 0 for k in keys}
+    mine_counts: dict[tuple[int, int], int] = {k: 0 for k in keys}
     for f in foods:
         k = chunk_of(f["x"], f["y"])
         if k in total_counts:
@@ -548,17 +582,24 @@ def periodic_spawn_around(points: list[tuple[float, float]]) -> None:
                 boost_counts[k] += 1
             elif fk == "shield":
                 shield_counts[k] += 1
+            elif fk == "mine":
+                mine_counts[k] += 1
 
-    # Spawn deficits: guarantee at least 1 boost and 1 shield
+    # Spawn deficits: maintain target mix for boost/shield/mine, then fill with normal
     for key in keys:
-        total = total_counts[key]
-        boosts = boost_counts[key]
+        total   = total_counts[key]
+        boosts  = boost_counts[key]
         shields = shield_counts[key]
-        desired_total = TARGET_PER_CHUNK
-        desired_boosts = max(MIN_BOOST_PER_CHUNK, int(round(desired_total * BOOST_FRACTION)))
+        mines_c = mine_counts[key]
+
+        desired_total   = TARGET_PER_CHUNK
+        desired_boosts  = max(MIN_BOOST_PER_CHUNK,  int(round(desired_total * BOOST_FRACTION)))
         desired_shields = max(MIN_SHIELD_PER_CHUNK, int(round(desired_total * SHIELD_FRACTION)))
+        desired_mines   = max(MIN_MINE_PER_CHUNK,   int(round(desired_total * MINE_FRACTION)))
+
         missing_total = max(0, desired_total - total)
 
+        # Top-up in priority order: boosts, shields, mines
         missing_boosts = max(0, desired_boosts - boosts)
         if missing_boosts > 0:
             spawn_items_in_chunk(key[0], key[1], missing_boosts, "boost")
@@ -569,8 +610,14 @@ def periodic_spawn_around(points: list[tuple[float, float]]) -> None:
             spawn_items_in_chunk(key[0], key[1], missing_shields, "shield")
             missing_total -= missing_shields
 
+        missing_mines = max(0, desired_mines - mines_c)
+        if missing_mines > 0:
+            spawn_items_in_chunk(key[0], key[1], missing_mines, "mine")
+            missing_total -= missing_mines
+
+        # Fill the rest respecting fractions (so boosts/shields/mines keep respawning)
         if missing_total > 0:
-            spawn_items_in_chunk(key[0], key[1], missing_total, "normal")
+            spawn_mixed_in_chunk(key[0], key[1], missing_total)
 
     last_density_spawn = now
 
@@ -687,7 +734,11 @@ def draw_foods(surf: pygame.Surface, camx: float, camy: float) -> None:
         sx, sy = world_to_screen(f["x"], f["y"], camx, camy)
         k = f.get("kind")
         if k == "boost":
-            pygame.draw.circle(surf, BOOST_COLOR, (sx, sy), f["r"])  # gold filled
+            base_r = f["r"] + 2
+            pulse = int(2 * (0.5 + 0.5 * math.sin(time.time() * 6)))
+            pr = max(1, base_r + pulse)
+            pygame.draw.circle(surf, BOOST_COLOR, (sx, sy), pr)
+            pygame.draw.circle(surf, (255, 240, 130), (sx, sy), pr, 2)
         elif k == "shield":
             # Bigger, pulsing, outlined to stand out clearly
             base_r = f["r"] + 3
@@ -696,10 +747,12 @@ def draw_foods(surf: pygame.Surface, camx: float, camy: float) -> None:
             pygame.draw.circle(surf, SHIELD_COLOR, (sx, sy), pr)       # bright fill
             pygame.draw.circle(surf, (245, 255, 245), (sx, sy), pr, 2) # subtle outline
         elif k == "mine":
-            # red mine food (looks dangerous)
-            base_r = f["r"] + 1
-            pygame.draw.circle(surf, MINE_COLOR, (sx, sy), base_r)
-            pygame.draw.circle(surf, (255, 220, 220), (sx, sy), base_r, 2)
+            # red mine food (danger sign) with subtle pulse
+            base_r = f["r"] + 3
+            pulse = int(2 * (0.5 + 0.5 * math.sin(time.time() * 5)))
+            pr = max(1, base_r + pulse)
+            pygame.draw.circle(surf, MINE_COLOR, (sx, sy), pr)
+            pygame.draw.circle(surf, (255, 220, 220), (sx, sy), pr, 2)
         else:
             pygame.draw.circle(surf, FOOD_COLOR, (sx, sy), f["r"])     # normal white
 
@@ -1066,7 +1119,7 @@ total_eaten1 = 0
 total_eaten2 = 0
 
 def main():
-    global total_eaten1, total_eaten2, SAFE_R, shrink_notice_until, snake1, snake2
+    global total_eaten1, total_eaten2, SAFE_R, shrink_notice_until, snake1, snake2, last_density_spawn, last_near_shield_spawn
     running = True
     game_state = "menu"
     game_mode = None  # "1p" or "2p"
@@ -1102,6 +1155,11 @@ def main():
                 # Restart: reset world, foods, snakes, timers, flags
                 foods.clear()
                 spawned_chunks.clear()
+                nets.clear()
+                mines.clear()
+                # reset spawn timers so items repopulate immediately
+                last_density_spawn = 0.0
+                last_near_shield_spawn = 0.0
                 total_eaten1 = 0
                 total_eaten2 = 0
                 # reset world radius
