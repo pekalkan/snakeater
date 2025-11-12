@@ -324,13 +324,19 @@ START_LENGTH = 250.0           # respawn starting trail length (matches Snake.__
 
  # --- Shields (green protection) ---
 
-
 SHIELD_FRACTION = 0.05  # 5% of foods are shields
 SHIELD_DURATION = 5.0             # each pickup grants 5 s protection
 
+# --- Red Mines (trap food) ---
+MINE_FRACTION = 0.05   # 5% of foods are red mines
+MINE_ARM_TIME = 3.0    # seconds from eat to detonation
+MINE_BLAST_RADIUS = 180.0  # explosion radius in pixels
+MINE_COLOR = (220, 60, 60)
+MINE_RING  = (255, 140, 140)
+
  # --- Net (circular trap) mechanic ---
 NET_COOLDOWN = 20.0
-NET_OFFSET_FRAC = 0.25       # net spawns this fraction of snake length ahead of head
+NET_OFFSET_FRAC = 0.60       # net spawns this fraction of snake length ahead of head
 NET_DURATION = 2.0            # seconds the net persists
 NET_RADIUS_PER_LEN = 0.45     # radius = this * caster.length
 NET_RADIUS_MIN = 120.0        # clamp minimum radius
@@ -346,7 +352,8 @@ LOSE_LENGTH = 60.0  # if a snake length <= 60, it loses
 
 spawned_chunks = set()  # {(cx, cy)}
 foods = []              # list of dicts: {"x","y","r","kind"}
-nets = []  # list of dicts: {"x","y","r","owner","until"}
+nets = []               # list of dicts: {"x","y","r","owner","until"}
+mines = []              # list of dicts: {"x","y","blast_r","detonate_at"}
 
 def chunk_of(px: float, py: float):
     cx = math.floor(px / CHUNK_SIZE)
@@ -378,7 +385,7 @@ def _make_food(x: float, y: float, kind: str) -> dict:
     """
     r = random.uniform(FOOD_R_MIN, FOOD_R_MAX)
     r_i = int(round(r))
-    if kind == "shield":
+    if kind in ("shield", "mine"):
         growth = 0.0
     else:
         # scale growth with radius relative to baseline FOOD_R
@@ -415,6 +422,8 @@ def spawn_chunk(cx: int, cy: int) -> None:
                     kind = "boost"
                 elif r < BOOST_FRACTION + SHIELD_FRACTION:
                     kind = "shield"
+                elif r < BOOST_FRACTION + SHIELD_FRACTION + MINE_FRACTION:
+                    kind = "mine"
                 else:
                     kind = "normal"
                 foods.append(_make_food(fx, fy, kind))
@@ -653,6 +662,14 @@ def eat_food_if_colliding(snake: Snake) -> int:
             kind = f.get("kind")
             if kind == "shield":
                 snake.apply_shield(SHIELD_DURATION)
+            elif kind == "mine":
+                # Arm a timed mine at this location; detonates after MINE_ARM_TIME
+                mines.append({
+                    "x": f["x"],
+                    "y": f["y"],
+                    "blast_r": float(MINE_BLAST_RADIUS),
+                    "detonate_at": time.time() + MINE_ARM_TIME,
+                })
             else:
                 # growth scaled per food
                 growth = f.get("growth", FOOD_GROWTH)
@@ -677,6 +694,11 @@ def draw_foods(surf: pygame.Surface, camx: float, camy: float) -> None:
             pr = max(1, base_r + pulse)
             pygame.draw.circle(surf, SHIELD_COLOR, (sx, sy), pr)       # bright fill
             pygame.draw.circle(surf, (245, 255, 245), (sx, sy), pr, 2) # subtle outline
+        elif k == "mine":
+            # red mine food (looks dangerous)
+            base_r = f["r"] + 1
+            pygame.draw.circle(surf, MINE_COLOR, (sx, sy), base_r)
+            pygame.draw.circle(surf, (255, 220, 220), (sx, sy), base_r, 2)
         else:
             pygame.draw.circle(surf, FOOD_COLOR, (sx, sy), f["r"])     # normal white
 
@@ -696,6 +718,60 @@ def draw_nets(surf: pygame.Surface, camx: float, camy: float) -> None:
         # outline ring
         pygame.draw.circle(disk, NET_RING, (disk.get_width()//2, disk.get_height()//2), int(n["r"]), 2)
         surf.blit(disk, (sx - disk.get_width()//2, sy - disk.get_height()//2))
+
+#
+# --- Mines (armed countdown + detonation) ---
+def draw_mines(surf: pygame.Surface, camx: float, camy: float) -> None:
+    if not mines:
+        return
+    now = time.time()
+    for m in mines:
+        sx, sy = world_to_screen(m["x"], m["y"], camx, camy)
+        r = int(m["blast_r"])
+        # show translucent disk while arming
+        arm_left = max(0.0, m["detonate_at"] - now)
+        disk = pygame.Surface((r*2+4, r*2+4), pygame.SRCALPHA)
+        pygame.draw.circle(disk, (MINE_COLOR[0], MINE_COLOR[1], MINE_COLOR[2], 60), (disk.get_width()//2, disk.get_height()//2), r)
+        pygame.draw.circle(disk, MINE_RING, (disk.get_width()//2, disk.get_height()//2), r, 3)
+        surf.blit(disk, (sx - disk.get_width()//2, sy - disk.get_height()//2))
+        # countdown text
+        ct = int(math.ceil(arm_left))
+        if ct > 0:
+            t = FONT.render(str(ct), True, (255, 230, 230))
+            surf.blit(t, (sx - t.get_width()//2, sy - t.get_height()//2))
+
+def _any_body_point_in_circle(s: Snake, cx: float, cy: float, r: float) -> bool:
+    r2 = r * r
+    for p in s.points:
+        dx = p[0] - cx
+        dy = p[1] - cy
+        if (dx*dx + dy*dy) <= r2:
+            return True
+    return False
+
+def update_and_detonate_mines(snakes: list[Snake]) -> None:
+    if not mines:
+        return
+    now = time.time()
+    keep = []
+    for m in mines:
+        if now < m["detonate_at"]:
+            keep.append(m)
+            continue
+        # detonate now
+        cx, cy, br = m["x"], m["y"], m["blast_r"]
+        for s in snakes:
+            # head inside => instant death (set length 0 so length-based defeat triggers)
+            if math.hypot(s.x - cx, s.y - cy) <= br:
+                s.length = 0.0
+                s._trim_trail_to_length()
+                continue
+            # otherwise, any body part inside => halve length
+            if _any_body_point_in_circle(s, cx, cy, br):
+                s.length = max(0.0, s.length * 0.5)
+                s._trim_trail_to_length()
+        # mine disappears after detonation
+    mines[:] = keep
 
 # --- Poison Zone Blink Warning ---
 def draw_poison_blink(surf: pygame.Surface) -> None:
@@ -1080,6 +1156,7 @@ def main():
             snake1.update(dt)
             total_eaten1 += eat_food_if_colliding(snake1)
             apply_net_effect([snake1], dt)
+            update_and_detonate_mines([snake1])
 
             # Camera follows P1 (full-screen)
             camx = snake1.x - W / 2
@@ -1089,6 +1166,7 @@ def main():
             screen.fill(BG_COLOR)
             draw_world_border(screen, camx, camy)
             draw_nets(screen, camx, camy)
+            draw_mines(screen, camx, camy)
             draw_foods(screen, camx, camy)
             snake1.draw(screen, camx, camy)
             if snake1.is_in_poison: draw_poison_blink(screen)
@@ -1098,7 +1176,6 @@ def main():
             draw_minimap(screen, [snake1])
             pygame.display.flip()
             continue
-
 
         # --- 2P split-screen ---
         # Spawn around both; cull around midpoint
@@ -1116,7 +1193,7 @@ def main():
         total_eaten1 += eat_food_if_colliding(snake1)
         total_eaten2 += eat_food_if_colliding(snake2)
         apply_net_effect([snake1, snake2], dt)
-
+        update_and_detonate_mines([snake1, snake2])
 
         # Head-on predation (elimination logic)
         if not game_over:
@@ -1158,6 +1235,7 @@ def main():
         left.fill(BG_COLOR)
         draw_world_border(left, cam1x, cam1y)
         draw_nets(left, cam1x, cam1y)
+        draw_mines(left, cam1x, cam1y)
         draw_foods(left, cam1x, cam1y)
         snake1.draw(left, cam1x, cam1y)
         snake2.draw(left, cam1x, cam1y)
@@ -1171,6 +1249,7 @@ def main():
         right.fill(BG_COLOR)
         draw_world_border(right, cam2x, cam2y)
         draw_nets(right, cam2x, cam2y)
+        draw_mines(right, cam2x, cam2y)
         draw_foods(right, cam2x, cam2y)
         snake1.draw(right, cam2x, cam2y)
         snake2.draw(right, cam2x, cam2y)
