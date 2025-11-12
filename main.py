@@ -4,11 +4,13 @@ import math
 import random
 import time
 import pygame
+import os
 
 # ---------------- Window / Pygame ----------------
 pygame.init()
 pygame.mixer.init()
-MUSIC_PATH = "assets/background.ogg"   # put your .ogg here (rename if needed)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+MUSIC_PATH = os.path.join(BASE_DIR, "assets", "background.ogg")   # absolute path resolved next to this file
 MUSIC_VOLUME = 0.5
 W, H = 1366, 768
 screen = pygame.display.set_mode((W, H))
