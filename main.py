@@ -336,11 +336,11 @@ MINE_RING  = (255, 140, 140)
 
  # --- Net (circular trap) mechanic ---
 NET_COOLDOWN = 20.0
-NET_OFFSET_FRAC = 0.60       # net spawns this fraction of snake length ahead of head
-NET_DURATION = 2.0            # seconds the net persists
-NET_RADIUS_PER_LEN = 0.45     # radius = this * caster.length
-NET_RADIUS_MIN = 120.0        # clamp minimum radius
-NET_RADIUS_MAX = 420.0        # clamp maximum radius
+NET_OFFSET_PIX = 220.0       # net spawns this many pixels ahead of head (fixed)
+NET_DURATION = 2.0           # seconds the net persists
+NET_RADIUS_PER_SQRT = 22.0   # radius = this * sqrt(length)
+NET_RADIUS_MIN = 120.0       # clamp minimum radius
+NET_RADIUS_MAX = 420.0       # clamp maximum radius
 NET_DECAY_RATE = 360.0        # length lost per second inside enemy net (faster than poison)
 NET_IGNORES_SHIELD = False    # if True, shield won't protect vs net
 NET_COLOR = (220, 80, 220, 90)  # translucent purple fill
@@ -584,9 +584,10 @@ def ensure_chunks_around(px: float, py: float, radius_chunks: int = 1) -> None:
                 spawn_chunk(*key)
                 spawned_chunks.add(key)
 
-# --- Net helpers ---
+ # --- Net helpers ---
 def _net_radius_for(s: Snake) -> float:
-    r = NET_RADIUS_PER_LEN * s.length
+    # Radius grows sublinearly with snake size (proportional to sqrt(length))
+    r = NET_RADIUS_PER_SQRT * math.sqrt(max(1.0, s.length))
     return clamp(r, NET_RADIUS_MIN, NET_RADIUS_MAX)
 
 def cast_net(caster: Snake) -> None:
@@ -596,8 +597,8 @@ def cast_net(caster: Snake) -> None:
         return
     caster.last_net_time = now
 
-    # Spawn the net slightly ahead of the head, proportional to current length
-    off = NET_OFFSET_FRAC * caster.length
+    # Spawn the net a fixed distance ahead of the head (independent of length)
+    off = NET_OFFSET_PIX
     nx = caster.x + caster.heading_x * off
     ny = caster.y + caster.heading_y * off
     nets.append({
