@@ -338,7 +338,7 @@ MINE_RING  = (255, 140, 140)
 NET_COOLDOWN = 20.0
 NET_OFFSET_PIX = 220.0       # net spawns this many pixels ahead of head (fixed)
 NET_DURATION = 2.0           # seconds the net persists
-NET_RADIUS_PER_SQRT = 22.0   # radius = this * sqrt(length)
+NET_RADIUS_PER_LEN = 0.25    # radius = this * snake.length (linear)
 NET_RADIUS_MIN = 120.0       # clamp minimum radius
 NET_RADIUS_MAX = 420.0       # clamp maximum radius
 NET_DECAY_RATE = 360.0        # length lost per second inside enemy net (faster than poison)
@@ -586,8 +586,8 @@ def ensure_chunks_around(px: float, py: float, radius_chunks: int = 1) -> None:
 
  # --- Net helpers ---
 def _net_radius_for(s: Snake) -> float:
-    # Radius grows sublinearly with snake size (proportional to sqrt(length))
-    r = NET_RADIUS_PER_SQRT * math.sqrt(max(1.0, s.length))
+    # Linear scaling with length, clamped
+    r = NET_RADIUS_PER_LEN * max(0.0, s.length)
     return clamp(r, NET_RADIUS_MIN, NET_RADIUS_MAX)
 
 def cast_net(caster: Snake) -> None:
