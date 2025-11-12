@@ -18,7 +18,7 @@ SFX_DIR = os.path.join(BASE_DIR, "assets")
 SFX_SHIELD_PATH = os.path.join(SFX_DIR, "shield.mp3")
 SFX_MINE_PATH   = os.path.join(SFX_DIR, "mine.mp3")
 SFX_POISON_PATH = os.path.join(SFX_DIR, "poison.mp3")
-SFX_NITRO_PATH  = os.path.join(SFX_DIR, "nitro.mp3")
+SFX_NITRO_PATH  = os.path.join(SFX_DIR, "boost.mp3")
 SFX_NET_PATH    = os.path.join(SFX_DIR, "net.mp3")
 SFX_VOLUME = 0.7
 
