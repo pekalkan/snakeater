@@ -15,11 +15,12 @@ MUSIC_VOLUME = 0.5
 
 # ---- SFX (shield, mine, poison, nitro, net) ----
 SFX_DIR = os.path.join(BASE_DIR, "assets")
-SFX_SHIELD_PATH = os.path.join(SFX_DIR, "shield.mp3")
-SFX_MINE_PATH   = os.path.join(SFX_DIR, "mine.mp3")
-SFX_POISON_PATH = os.path.join(SFX_DIR, "poison.mp3")
-SFX_NITRO_PATH  = os.path.join(SFX_DIR, "boost.mp3")
-SFX_NET_PATH    = os.path.join(SFX_DIR, "net.mp3")
+SFX_SHIELD_PATH  = os.path.join(SFX_DIR, "shield.mp3")
+SFX_MINE_PATH    = os.path.join(SFX_DIR, "mine.mp3")
+SFX_POISON_PATH  = os.path.join(SFX_DIR, "poison.mp3")
+SFX_NITRO_PATH   = os.path.join(SFX_DIR, "boost.mp3")
+SFX_NET_PATH     = os.path.join(SFX_DIR, "net.mp3")
+SFX_SHRINK_PATH  = os.path.join(SFX_DIR, "shrinking.mp3")
 SFX_VOLUME = 0.7
 
 # Load sounds (keep try/except so game still runs if a file is missing)
@@ -53,6 +54,13 @@ try:
 except Exception as _e:
     sfx_net = None
     print(f"[sfx] net not loaded: {SFX_NET_PATH} ({_e})")
+
+try:
+    sfx_shrink = pygame.mixer.Sound(SFX_SHRINK_PATH)
+    sfx_shrink.set_volume(SFX_VOLUME)
+except Exception as _e:
+    sfx_shrink = None
+    print(f"[sfx] shrink not loaded: {SFX_SHRINK_PATH} ({_e})")
 
 # Dedicated channel for looping poison ambience (so it doesn't fight with other SFX)
 POISON_CH_INDEX = 5
@@ -1279,6 +1287,9 @@ def main():
             shrink_world_centered(SHRINK_FACTOR)
             shrink_notice_until = now + SHRINK_NOTICE_SECS
             next_shrink_time = now + SHRINK_INTERVAL
+            # Play shrink SFX once when the safe zone shrinks
+            if 'sfx_shrink' in globals() and sfx_shrink:
+                sfx_shrink.play()
 
         # Events
         for e in pygame.event.get():
