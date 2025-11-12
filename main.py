@@ -7,6 +7,9 @@ import pygame
 
 # ---------------- Window / Pygame ----------------
 pygame.init()
+pygame.mixer.init()
+MUSIC_PATH = "assets/background.ogg"   # put your .ogg here (rename if needed)
+MUSIC_VOLUME = 0.5
 W, H = 1366, 768
 screen = pygame.display.set_mode((W, H))
 pygame.display.set_caption("snakeater - shields added")
@@ -37,6 +40,19 @@ POISON_WARN_TEXT = (255, 230, 230)
 SPEED_YELLOW   = (255, 220, 0)
 CD_READY       = (120, 255, 120)
 CD_WAIT        = (255, 180, 70)
+
+# ---------------- Music helpers ----------------
+def play_bg_music(path: str = MUSIC_PATH, volume: float = MUSIC_VOLUME) -> None:
+    """
+    Load and loop background music. Safe to call multiple times.
+    Uses OGG for best compatibility (pygbag/WebAssembly friendly).
+    """
+    try:
+        pygame.mixer.music.load(path)
+        pygame.mixer.music.set_volume(volume)
+        pygame.mixer.music.play(-1, fade_ms=800)  # loop forever with short fade-in
+    except Exception as e:
+        print(f"[music] Could not start background music: {e}")
 
 # ---------------- Minimap (bottom-right overlay) ----------------
 MINIMAP_SIZE   = 180        # square panel size (pixels)
@@ -1175,6 +1191,8 @@ def main():
     game_mode = None  # "1p" or "2p"
     game_over = False
     loser = None
+    music_paused = False
+    play_bg_music()  # start looping background music once
 
     # Safe zone shrink scheduling
     next_shrink_time = time.time() + SHRINK_INTERVAL
@@ -1243,6 +1261,14 @@ def main():
                     cast_net(snake1)
                 elif e.key == pygame.K_RSHIFT:  # P2: cast net with Right Shift
                     cast_net(snake2)
+                # --- Music toggle (M to pause/resume) ---
+                elif e.type == pygame.KEYDOWN and e.key == pygame.K_m:
+                    if music_paused:
+                        pygame.mixer.music.unpause()
+                        music_paused = False
+                    else:
+                        pygame.mixer.music.pause()
+                        music_paused = True
 
             if game_state == "menu":
                 if e.type == pygame.KEYDOWN:
