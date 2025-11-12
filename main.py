@@ -313,7 +313,7 @@ FOOD_GROWTH = 30.0  # base growth used for speed-decay normalization and default
 SPEED_DECAY_PER_FOOD = 0.01
 SPEED_DECAY_PER_LENGTH = SPEED_DECAY_PER_FOOD / FOOD_GROWTH  # per pixel of length gained
 MIN_SIZE_SPEED_FACTOR = 0.5  # minimum cap: 50% of intended speed
-BOOST_FRACTION = 0.10   # 10% boost
+BOOST_FRACTION = 0.04   # 4% boost
 BOOST_MULT     = 1.5    # move at 1.5x when boosted
 BOOST_DURATION = 5.0    # boost lasts 5 seconds
 PREDATION_RATIO = 1.0    # attacker must be > (ratio × defender.length) to steal
@@ -324,11 +324,11 @@ START_LENGTH = 250.0           # respawn starting trail length (matches Snake.__
 
  # --- Shields (green protection) ---
 
-SHIELD_FRACTION = 0.08  # 8% shield
+SHIELD_FRACTION = 0.05  # 5% shield
 SHIELD_DURATION = 5.0             # each pickup grants 5 s protection
 
 # --- Red Mines (trap food) ---
-MINE_FRACTION = 0.07   # 7% mines
+MINE_FRACTION = 0.05   # 5% mines
 MINE_ARM_TIME = 3.0    # seconds from eat to detonation
 MINE_BLAST_RADIUS = 180.0  # explosion radius in pixels
 MINE_COLOR = (220, 60, 60)
@@ -434,10 +434,10 @@ def spawn_chunk(cx: int, cy: int) -> None:
             pass
 
 # ---------------- Spawn Balancer (per chunk) ----------------
-TARGET_PER_CHUNK = 5               # desired items per active chunk (increases density)
-MIN_BOOST_PER_CHUNK = 1            # guarantee at least one boost per active chunk
-MIN_SHIELD_PER_CHUNK = 1           # guarantee at least one shield per active chunk
-MIN_MINE_PER_CHUNK = 1             # guarantee at least one mine per active chunk
+TARGET_PER_CHUNK = FOOD_PER_CHUNK  # use base density
+MIN_BOOST_PER_CHUNK = 0            # no per-chunk guarantees; use fractions
+MIN_SHIELD_PER_CHUNK = 0
+MIN_MINE_PER_CHUNK = 0
 
 
 # --- Helper: spawn a mixture of item kinds according to global fractions ---
