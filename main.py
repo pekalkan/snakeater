@@ -13,11 +13,13 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MUSIC_PATH = os.path.join(BASE_DIR, "assets", "background.ogg")   # absolute path resolved next to this file
 MUSIC_VOLUME = 0.5
 
-# ---- SFX (shield, mine, poison) ----
+# ---- SFX (shield, mine, poison, nitro, net) ----
 SFX_DIR = os.path.join(BASE_DIR, "assets")
 SFX_SHIELD_PATH = os.path.join(SFX_DIR, "shield.mp3")
 SFX_MINE_PATH   = os.path.join(SFX_DIR, "mine.mp3")
 SFX_POISON_PATH = os.path.join(SFX_DIR, "poison.mp3")
+SFX_NITRO_PATH  = os.path.join(SFX_DIR, "nitro.mp3")
+SFX_NET_PATH    = os.path.join(SFX_DIR, "net.mp3")
 SFX_VOLUME = 0.7
 
 # Load sounds (keep try/except so game still runs if a file is missing)
@@ -39,6 +41,18 @@ try:
 except Exception as _e:
     sfx_poison = None
     print(f"[sfx] poison not loaded: {SFX_POISON_PATH} ({_e})")
+try:
+    sfx_nitro = pygame.mixer.Sound(SFX_NITRO_PATH)
+    sfx_nitro.set_volume(SFX_VOLUME)
+except Exception as _e:
+    sfx_nitro = None
+    print(f"[sfx] nitro not loaded: {SFX_NITRO_PATH} ({_e})")
+try:
+    sfx_net = pygame.mixer.Sound(SFX_NET_PATH)
+    sfx_net.set_volume(SFX_VOLUME)
+except Exception as _e:
+    sfx_net = None
+    print(f"[sfx] net not loaded: {SFX_NET_PATH} ({_e})")
 
 # Dedicated channel for looping poison ambience (so it doesn't fight with other SFX)
 POISON_CH_INDEX = 5
@@ -714,6 +728,8 @@ def cast_net(caster: Snake) -> None:
         "owner": caster,
         "until": now + NET_DURATION,
     })
+    if 'sfx_net' in globals() and sfx_net:
+        sfx_net.play()
 
 def update_nets() -> None:
     now = time.time()
@@ -785,6 +801,8 @@ def eat_food_if_colliding(snake: Snake) -> int:
                 snake.grow(growth)
                 if kind == "boost":
                     snake.apply_boost(BOOST_MULT, BOOST_DURATION)
+                    if 'sfx_nitro' in globals() and sfx_nitro:
+                        sfx_nitro.play()
         else:
             keep.append(f)
     foods = keep
