@@ -1108,6 +1108,33 @@ def draw_hud_two(surf: pygame.Surface, s1: Snake, eaten1: int, s2: Snake, eaten2
     hud2.blit(txt2, (pad, pad))
     surf.blit(hud2, (W - w2 - 12, 10))
 
+#
+# ---------------- 2P Far-Start Helper ----------------
+def place_players_opposite_edges() -> None:
+    """Place snake1 and snake2 on opposite sides of the safe circle at the largest possible separation.
+    Both spawn slightly inside the border and face inward."""
+    global snake1, snake2
+    # choose a random diameter direction
+    ang = random.uniform(0.0, 2.0 * math.pi)
+    # spawn radius slightly inside the border to avoid instant poison
+    margin = 160.0
+    r = max(120.0, SAFE_R - margin)
+    x1 = math.cos(ang) * r
+    y1 = math.sin(ang) * r
+    x2 = -x1
+    y2 = -y1
+    # respawn snakes at those locations
+    snake1.respawn(x1, y1)
+    snake2.respawn(x2, y2)
+    # face both toward the center initially
+    def _face_in(s: Snake):
+        dd = math.hypot(-s.x, -s.y)
+        if dd > 1e-6:
+            s.heading_x = (-s.x) / dd
+            s.heading_y = (-s.y) / dd
+    _face_in(snake1)
+    _face_in(snake2)
+
 # ---------------- Main Loop ----------------
 controls_p1 = (pygame.K_a, pygame.K_d, pygame.K_w, pygame.K_s)              # left, right, up, down
 controls_p2 = (pygame.K_LEFT, pygame.K_RIGHT, pygame.K_UP, pygame.K_DOWN)   # left, right, up, down
@@ -1167,6 +1194,8 @@ def main():
                 # reset snakes
                 snake1 = Snake(-120.0, 0.0, controls_p1, SNAKE_BODY, SNAKE_HEAD)
                 snake2 = Snake( 120.0, 0.0, controls_p2, SNAKE2_BODY, SNAKE2_HEAD)
+                if game_mode == "2p":
+                    place_players_opposite_edges()
                 # timers & flags
                 next_shrink_time = time.time() + SHRINK_INTERVAL
                 shrink_notice_until = 0.0
@@ -1192,11 +1221,13 @@ def main():
                         game_mode = "1p"; game_state = "game"
                     elif e.key == pygame.K_2:
                         game_mode = "2p"; game_state = "game"
+                        place_players_opposite_edges()
                 elif e.type == pygame.MOUSEBUTTONDOWN and e.button == 1:
                     if btn1_rect.collidepoint(e.pos):
                         game_mode = "1p"; game_state = "game"
                     elif btn2_rect.collidepoint(e.pos):
                         game_mode = "2p"; game_state = "game"
+                        place_players_opposite_edges()
 
         if game_state == "menu":
             draw_start_menu(screen, btn1_rect, btn2_rect)
