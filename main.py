@@ -574,7 +574,13 @@ def _net_radius_for(s: Snake) -> float:
     return clamp(r, NET_RADIUS_MIN, NET_RADIUS_MAX)
 
 def cast_net(caster: Snake) -> None:
-    # spawn the net a quarter-length ahead of the caster along heading
+    now = time.time()
+    # Cooldown check
+    if hasattr(caster, "last_net_time") and now - caster.last_net_time < 20.0:
+        return
+    caster.last_net_time = now
+
+    # Spawn the net starting at the head position and projected forward by quarter-length
     off = 0.25 * caster.length
     nx = caster.x + caster.heading_x * off
     ny = caster.y + caster.heading_y * off
@@ -583,7 +589,7 @@ def cast_net(caster: Snake) -> None:
         "y": ny,
         "r": _net_radius_for(caster),
         "owner": caster,
-        "until": time.time() + NET_DURATION,
+        "until": now + NET_DURATION,
     })
 
 def update_nets() -> None:
