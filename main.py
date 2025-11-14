@@ -126,11 +126,13 @@ MINIMAP_BG     = (20, 20, 20, 170)
 MINIMAP_BORDER = (120, 120, 120)
 
 # ---------------- Finite World Bounds (CIRCULAR) ----------------
-# World size scale: previously 3.0, now doubled to 6.0 for a much larger play area
+# World size scale: previously 3.0, then 6.0; now radius is scaled by sqrt(2) to double initial area
 _RECT_W, _RECT_H = 4320, 2430
 WORLD_DIAMETER_SCALE = 6.0
 BASE_DIAMETER = min(_RECT_W, _RECT_H)
-SAFE_R = int((BASE_DIAMETER * WORLD_DIAMETER_SCALE) / 2)   # scaled initial safe radius
+SAFE_R = int((BASE_DIAMETER * WORLD_DIAMETER_SCALE) / 2)
+# Double initial safe zone AREA => multiply radius by sqrt(2)
+SAFE_R = int(SAFE_R * math.sqrt(2.0))
 SAFE_R_INIT = SAFE_R
 OUTSIDE_DECAY_RATE = 180.0                 # length lost per second while outside
 
@@ -1409,7 +1411,8 @@ def main():
         ensure_chunks_around(snake2.x, snake2.y, radius_chunks=1)
         midx = 0.5 * (snake1.x + snake2.x)
         midy = 0.5 * (snake1.y + snake2.y)
-        cull_far_foods(midx, midy, keep_radius_chunks=2)
+        # Use a larger keep radius in 2P so items don't pop in/out near the split views
+        cull_far_foods(midx, midy, keep_radius_chunks=4)
         periodic_spawn_around([(snake1.x, snake1.y), (snake2.x, snake2.y)])
         update_nets()
 
